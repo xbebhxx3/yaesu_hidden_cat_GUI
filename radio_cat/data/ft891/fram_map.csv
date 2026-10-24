@@ -1,0 +1,29 @@
+start,end,size,name,ram,confidence,evidence,purpose,values
+0x0000,0x0002,2,reserved,—,unknown,无正常路径引用,保留区,—（未确认；全表编辑可自由改写）
+0x0002,0x0004,2,**magic slot 1**,—,confirmed,0x2474 写 A5; 0x24A6/AC 读回比对 0xA55A,魔数槽 1,0xA5（魔数片 1；固件以 0xA55A 校验）
+0x0004,0x0006,2,**magic slot 2**,—,confirmed,0x247A/8C 写 5A; 0x24A6/AC 读回,魔数槽 2,0x5A（魔数片 2；固件以 0xA55A 校验）
+0x0006,0x0008,2,**config pair**（含功率等级）,**0xFF200A/0xFF200B**,confirmed,启动 0x1614→0x24F0 载入；0x2502/0x250C 写回；等级 = RAM[0xFF200B]&0x18（0x1492）,配置对（含功率等级）,0x0007 bit0-2=TS（市场/类型；资料列出 0/2/3/6）；bit3-4=功率等级：0x18=100W、0x00=50W、0x08=20W、0x10=10W；0x0006/0x0007 必须成对读改写；JP 写入保留 0x0006 与 0x0007 bit5-7
+0x0008,0x0009,1,init flag,—,confirmed,0x2520/2E 读; 0x2548 匹配后写入,初始化标志,0xA5（初始化完成标志）
+0x0009,0x000A,1,reserved,—,unknown,无引用（FTDX10 此处是设置版本）,保留,—（未确认；FTDX10 此处为设置版本）
+0x000A,0x0138,302,**internal settings blk0 (302B)**,0xFF8BA2,confirmed,块读写**长度 0x12E**（0x1648 读 / 0x24D8 写）→ 0x0A..0x137；SP 路径上界 <0x138（0x1D3A2）,内部设置块 0（302B）,302B 菜单/设置值；具体项未逐项列举；改前备份
+0x0138,0x0150,24,reserved,—,unknown,间隙,保留间隙,—（未确认）
+0x0150,0x02AE,350,**internal settings blk1 (350B)**,0xFF8CD0,confirmed,块读写**长度 0x15E**（0x1830/0x2552）；内含 0x150+0x96、0x1E6+0xC8 及功率字段,内部设置块 1（350B，含功率字段与 PE 校准）,0x024C-0x0251=6 个频段/模式的 RF 功率(PC)；0x0254-0x0257=MG 增益（上限 0x65=101，非功率）；0x0233-0x0244=PE TX AUDIO EQ/P-EQ（FREQ 0-7/0-9/0-18；LEVEL -20..+10；BWTH 1-10；详见 CONCLUSIONS.md）
+0x02AE,0x05A6,760,reserved / undocumented,—,unknown,无即时基址引用,保留/未记录,—（未确认）
+0x05A6,0x06AA,260,**CW message 5×52B**,—,confirmed,0x229E 写 5×0x34 字节（模板 0x22C6）,CW 消息 5×52B,5 条 CW 消息，每条 52B（文本/长度按固件格式）
+0x06AA,0x07A4,250,**RTTY/PSK message 5×50B**,—,confirmed,0x2362 写 5×0x32 字节（模板 0x238E）,RTTY/PSK 消息 5×50B,5 条 RTTY/PSK 消息，每条 50B
+0x07A4,0x089E,250,reserved / undocumented,—,unknown,间隙,保留间隙,—（未确认）
+0x089E,0x0D30,1170,"**band stack bank0 (13×90B, A 组)**",—,confirmed,0x1AC2→0x1BD0 循环 13× 调 90B 写入器 0x1BE2,频段堆栈 bank0（13×90B，A 组）,13×90B 频段堆栈记录（频率/模式等，具体字段未逐项列举）
+0x0D30,0x11C2,1170,"band stack bank1 (13×90B, A 组)",—,confirmed,0x1ACA→0x1BD0,频段堆栈 bank1（13×90B，A 组）,13×90B 频段堆栈记录（频率/模式等，具体字段未逐项列举）
+0x11C2,0x1654,1170,"band stack bank2 (13×90B, A 组)",—,confirmed,0x1AD2→0x1BD0,频段堆栈 bank2（13×90B，A 组）,13×90B 频段堆栈记录（频率/模式等，具体字段未逐项列举）
+0x1654,0x1AE6,1170,"band stack bank3 (13×90B, B 组)",—,confirmed,0x1ADA→0x1BD0,频段堆栈 bank3（13×90B，B 组）,13×90B 频段堆栈记录（频率/模式等，具体字段未逐项列举）
+0x1AE6,0x1F78,1170,"band stack bank4 (13×90B, B 组)",—,confirmed,0x1AE2→0x1BD0,频段堆栈 bank4（13×90B，B 组）,13×90B 频段堆栈记录（频率/模式等，具体字段未逐项列举）
+0x1F78,0x240A,1170,"band stack bank5 (13×90B, B 组)",—,confirmed,0x1AEA→0x1BD0,频段堆栈 bank5（13×90B，B 组）,13×90B 频段堆栈记录（频率/模式等，具体字段未逐项列举）
+0x240A,0x2464,90,VFO state A (90B),—,inferred,0x2F1C 给出基址 0x240A 交给 90B 写入器 0x2EE4,VFO 状态 A（90B）,90B VFO 状态记录（具体字段未逐项列举）
+0x2464,0x24BE,90,VFO state B (90B),—,inferred,控制字节前的第二个 90B 槽,VFO 状态 B（90B）,90B VFO 状态记录（具体字段未逐项列举）
+0x24BE,0x24C5,7,band control 7B,—,confirmed,0x1B06/0x1B10/0x1B1A–0x1B32 字节写；0x2FAA 5B 块写；0x1670 读,频段控制 7B,7B 频段控制标志（具体位定义未逐项确认）
+0x24C5,0x273B,630,stack/QMB records 7×90B,—,inferred,0x2F6E 计算 0x24C5 + n*90；初始化循环 0x1B42 跑 5 次,堆栈/QMB 记录 7×90B,7×90B 堆栈/Quick Memory 记录
+0x273B,0x275C,33,memory control 33B,—,confirmed,初始化 0x1B5A–0x1B86：两个标志字节 + 两个 15B 位图,存储控制 33B,2 个标志字节 + 2×15B 位图
+0x275C,0x507E,10530,**memory channels 117×90B**,—,confirmed,0x2F5A 计算 0x275C + n*90；0x2943 块读写 0x17BF0/0x1D96C,存储信道 117×90B,117 个存储信道，每条 90B
+0x507E,0x5510,1170,presets 13×90B,—,confirmed,0x1BA2 循环 13× 调用 90B 写入器 0x1BE2,预设 13×90B,13 个预设，每条 90B
+0x5510,0x556A,90,special preset 1×90B,—,inferred,0x1BC6 在 0x5510 调 0x1BE2 一次,特殊预设 1×90B,1 个特殊预设，90B
+0x556A,0x8000,10902,unused,—,inferred,无引用；SPW/SPR 限制地址 <0x8000（0x1D2BA/0x1D31A）,未分配,—（未分配；SPW/SPR 地址需 <0x8000）

@@ -1,0 +1,103 @@
+{
+  "id": "model_id",
+  "name": "Vendor Model / firmware revision",
+  "cat_id": "",
+  "id_status": "unknown",
+  "ve_magic": "",
+  "ve_full": "",
+  "status": "unverified",
+  "magic_status": "unknown",
+  "magic_evidence": "",
+  "notes": "",
+  "serial": {
+    "baud_default": null,
+    "data_bits": null,
+    "parity": null,
+    "stop_bits": null,
+    "flow_control_mode": null,
+    "evidence": ""
+  },
+  "responses": {
+    "id_length": null,
+    "ve_length": null,
+    "jp_length": null,
+    "fd_length": null,
+    "kt_length": null,
+    "pe_length": null,
+    "spm_tr_length": null,
+    "spm_t2_length": null,
+    "spn_length": null,
+    "spsdr_length": null
+  },
+  "fram": {
+    "size": null,
+    "address_min": null,
+    "address_max": null,
+    "config_pair_addr": null
+  },
+  "power": {
+    "config_pair_addr": null,
+    "ts_mask": null,
+    "power_mask": null,
+    "exp_bit": null,
+    "aux_mask": null,
+    "levels": {},
+    "ts_tables": {},
+    "exp_table": [],
+    "status": "unverified"
+  },
+  "settings_table": {
+    "base_addr": null,
+    "start_addr": null,
+    "end_addr": null,
+    "length": null
+  },
+  "dumps": {
+    "e0_length": null,
+    "e8_length": null
+  },
+  "service_menu": {
+    "item_count": null,
+    "index_addr": null,
+    "subcode_addr": null,
+    "mapping_status": "unavailable"
+  },
+  "pe_calibration": {
+    "selectors": [],
+    "address_start": null,
+    "address_end": null
+  },
+  "data_files": {
+    "fram_map": null,
+    "service_items": null
+  },
+  "capabilities": {
+    "quick_commands": false,
+    "fram_raw_access": false,
+    "fram_raw_write": false,
+    "fram_full_read": false,
+    "power_config_read": false,
+    "power_class_write": false,
+    "ts_exp_write": false,
+    "settings_table": false,
+    "service_menu": false,
+    "service_mode": false,
+    "pe_calibration": false,
+    "jp_write": false,
+    "fd_write": false,
+    "full_backup": false,
+    "fd_read": false,
+    "kt_read": false,
+    "kt_write": false,
+    "ek": false,
+    "eo": false
+  },
+  "service_mode": {
+    "enter_value": null,
+    "all_reset_value": null,
+    "enter_description": "unverified",
+    "reset_warning": "unverified",
+    "status": "unverified"
+  },
+  "service_code": ""
+}
