@@ -155,7 +155,7 @@ BUTTON_TIPS = {
     "JP 写入（未验证，禁用）": "当前机型 JP 写入存在未验证副作用或未做真机验证，写入保持禁用。",
     "读取配置": "读取当前配置定义的配置字节并按其位掩码解析。",
     "预览功率等级": "只计算功率等级位目标值，不写设备。",
-    "写入功率等级": "按当前配置定义的功率等级位写入，保留其他位并回读。",
+    "写入功率等级": "写入功率等级位（保留其他位并回读）；当前机型配置了功率上限（AC）时，再用标准 CAT EX 写入各上限项并逐项回读。",
     "预览 TS/EXP": "只计算 TS/EXP 位目标值，不写设备，会显示参考频率范围。",
     "写入 TS/EXP": "按当前配置定义的 TS/EXP 位写入。",
     "进入服务模式 / 临时宽频（会复位）": "发送当前机型配置定义的服务模式命令；可能立即复位设备。",
@@ -691,6 +691,92 @@ class HiddenCat:
             raise CatError("当前机型配置未提供已确认的 E8 转储长度")
         return self._ascii("E8", expect=n, timeout=self._t_for(n, 3.0))
 
+    # ---- EX（标准 CAT 菜单读写；用于功率上限 AC） ----
+    @staticmethod
+    def _norm_ex_addr(addr) -> str:
+        a = str(addr).strip().upper()
+        if not a or len(a) % 2 or any(c not in "0123456789ABCDEF" for c in a):
+            raise ValueError("EX 菜单地址必须是偶数位十六进制字符")
+        return a
+
+    def ex_read(self, addr) -> int:
+        """EX 菜单读取：发送 EX<地址>;，回包为 <地址回显><数值>;。"""
+        a = self._norm_ex_addr(addr)
+        r = self._ascii("EX" + a, expect=None, timeout=self._t_for(32, 0.6))
+        if self._err(r):
+            raise CatError(f"EX 读取被拒绝（{a}）")
+        body = r.decode("ascii", "replace")
+        prefix = "EX" + a
+        if not body.startswith(prefix):
+            raise CatError(f"EX 回包异常: {hexs(r)}")
+        val = body[len(prefix):].rstrip(";").strip()
+        if not val.isdigit():
+            raise CatError(f"EX 回包数值解析失败: {body!r}")
+        return int(val)
+
+    def ex_set(self, addr, value: int, digits: int = 3) -> bytes:
+        """EX 菜单写入：发送 EX<地址><数值>;，成功回 A;，失败回 ?;。
+
+        EX 菜单项由固件按当前档位区间校验；超出当前功率等级上限时返回 ?;。
+        """
+        a = self._norm_ex_addr(addr)
+        digits = int(digits)
+        value = int(value)
+        if not (0 <= value < 10 ** digits):
+            raise ValueError(f"EX 数值超出 {digits} 位范围")
+        r = self._ascii("EX" + a + f"{value:0{digits}d}", expect=2)
+        if self._err(r):
+            raise CatError(
+                f"EX 写入被拒绝（{a}={value}）：可能超出设备当前档位上限；"
+                "刚改过档位时需断电重启再写")
+        if not self._ok(r):
+            raise CatError(f"EX 写入未确认: {hexs(r)}")
+        return r
+
+    def ac_write_cfg(self) -> dict:
+        """当前机型声明的功率上限（AC）写入配置；未启用时返回空字典。"""
+        cfg = get_rig_value(self.profile, "power", "ac_write", {})
+        return dict(cfg) if isinstance(cfg, dict) else {}
+
+    def ac_targets(self, class_label: str) -> list[int]:
+        """按功率等级标签返回各上限项的目标值（顺序与 items 一致）。"""
+        targets = self.ac_write_cfg().get("targets", {}) or {}
+        key = str(class_label)
+        if key not in targets:
+            raise CatError(f"当前机型未配置“{class_label}”的功率上限目标值")
+        return [int(v) for v in targets[key]]
+
+    def write_power_limits(self, class_label: str, progress=None) -> list[dict]:
+        """按当前机型配置写入各功率上限项（标准 CAT EX），并逐项回读。
+
+        返回 [{label, addr, target, readback, error}, ...]；即使某项被固件
+        拒绝（如超出当前档位上限）也会继续写其余项，便于一次性看到结果。
+        """
+        cfg = self.ac_write_cfg()
+        items = list(cfg.get("items", []) or [])
+        if not items:
+            raise CatError("当前机型未配置可写的功率上限项")
+        values = self.ac_targets(class_label)
+        if len(items) != len(values):
+            raise CatError("功率上限项数与目标值数量不一致")
+        digits = int(cfg.get("value_digits", 3))
+        results = []
+        for i, (item, value) in enumerate(zip(items, values)):
+            addr = item.get("addr")
+            entry = {"label": str(item.get("label", "")), "addr": str(addr),
+                     "target": int(value), "readback": None, "error": None}
+            try:
+                self.ex_set(addr, int(value), digits)
+            except CatError as exc:
+                entry["error"] = str(exc)
+            try:
+                entry["readback"] = self.ex_read(addr)
+            except CatError:
+                entry["readback"] = None
+            results.append(entry)
+            if progress:
+                progress(i + 1, len(items))
+        return results
 
     # ---- JP ----
     def jp_read(self) -> bytes:

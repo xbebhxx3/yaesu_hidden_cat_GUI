@@ -36,6 +36,7 @@
     "fd_write": true,
     "power_config_read": true,
     "power_class_write": true,
+    "power_ac_write": true,
     "kt_read": false,
     "fd_read": true,
     "kt_write": false,
@@ -451,7 +452,24 @@
       "7": "频段组合 8"
     },
     "range_note": "范围来自机型配置文件中的频段组合表；地区/固件差异请以设备手册为准。",
-    "note": "功率页只写 FRAM[0x0007] bit3-4 的功率等级位，不读写各频段 RF/MAX 功率上限；上限请在电台菜单中自行设置。",
+    "note": "本页写入功率等级与功率上限（AC）。",
+    "ac_write": {
+      "value_digits": 3,
+      "items": [
+        {"label": "HF MAX POWER", "addr": "030401"},
+        {"label": "50M MAX POWER", "addr": "030402"},
+        {"label": "70M MAX POWER", "addr": "030403"},
+        {"label": "AM MAX POWER", "addr": "030404"}
+      ],
+      "targets": {
+        "100 W": [100, 100, 50, 25],
+        "50 W": [50, 50, 50, 25],
+        "20 W": [10, 20, 20, 20],
+        "10 W": [10, 10, 10, 10]
+      },
+      "evidence": "CAT 手册 Table 2：MAX POWER 位于 P1=03(OPERATION SETTING) / P2=04(TX GENERAL) / P3=01–04(HF/50M/70M/AM)，3 位数值。固件 MAIN V01-15 EX 处理函数 0x2962E 把 (P1,P2,P3) 映射为菜单索引 172–175，其写处理函数写 RAM 0xFFAC26–0xFFAC29，即 FRAM[0x046A–0x046D]（MAX POWER=AC）。档位区间表 0x159F6 的 100 W 行与手册允许区间一致。",
+      "reboot_note": "EX 写入按设备当前 RAM 档位夹取；刚改过档位时需整机断电重开，再写上限。"
+    },
     "exp_note": "EXP 为临时状态：设备复位或设置版本迁移时会按 JP1006/EXP 跳线状态重新覆盖，不能作为持久修改。",
     "config_pair_addr": 6,
     "power_mask": 24,

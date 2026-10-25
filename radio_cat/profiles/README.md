@@ -9,7 +9,7 @@
 - `serial`: `baud_default`, `data_bits`, `parity`, `stop_bits`, `flow_control`, `evidence`
 - `responses`: 各 CAT 命令回包长度
 - `fram`: 外部 FRAM 地址范围与配置对
-- `power`: 配置字节位掩码、功率等级映射、TS 频段组合表与扩展范围；不包含各频段 RF/MAX 上限
+- `power`: 配置字节位掩码、功率等级映射、TS 频段组合表与扩展范围；可选 `ac_write` 声明用标准 CAT `EX` 写入的功率上限项（`value_digits`、`items`（`label`/`addr`）、`targets`（按功率等级标签给出等长目标值），`items` 与每个 `targets` 数组长度必须一致，`addr` 为偶数位十六进制）
 - `settings_table`: 内部设置/校准表基址、起止地址和长度
 - `dumps`: E0/E8 转储长度；未知值必须是 `null`
 - `service_menu` / `service_mode`: 项目数、索引/子码地址、入口操作码与风险说明
@@ -20,7 +20,7 @@
 
 ASCII CAT 命令如果没有确认的定长回包长度，可使用终止符读取；定长二进制转储长度未知时，相关按钮会禁用。
 
-功率页只改 `FRAM[0x0007]` 的等级位；功率页不读写各频段 RF/MAX 上限，上限需在电台菜单中设置。`FRAM 全表` 编辑器仍按地址写入任意字节。`power.exp_note`、`power.ts_note` 与 `power.band_frequency_hints` 仅用于界面提示，不参与位运算；`power.ts_invalid` / `power.ts_conditional` 用于标注已知无效或条件有效的 TS 值；`band_frequency_hints` 是通用业余频段参考，不代表本机开放范围。
+功率页写入功率等级与功率上限（AC）：等级位改 `FRAM[0x0007]`，上限按 `power.ac_write` 用标准 CAT `EX` 写入。`EX` 上限受设备当前档位夹取，未配置 `ac_write` 的机型只写等级位。`FRAM 全表` 编辑器仍按地址写入任意字节。`power.exp_note`、`power.ts_note` 与 `power.band_frequency_hints` 仅用于界面提示，不参与位运算；`power.ts_invalid` / `power.ts_conditional` 用于标注已知无效或条件有效的 TS 值；`band_frequency_hints` 是通用业余频段参考，不代表本机开放范围。
 
 配置文件中的静态证据不等于真机验证。本发行包不包含测试目录或测试脚本。
 

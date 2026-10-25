@@ -775,7 +775,7 @@ def launch_gui():
             self.btn_pwr_preview.pack(side="left", padx=4)
             self.btn_pwr_write = ttk.Button(row2, text="写入功率等级", command=self.do_pwr_write)
             self.btn_pwr_write.pack(side="left", padx=4)
-            ttk.Label(row2, text="只写功率等级位；各频段 RF/MAX 上限请在电台菜单中设置。",
+            ttk.Label(row2, text="本页写入功率等级与功率上限（AC）。",
                       foreground="#555").pack(side="left", padx=8)
 
             row3 = ttk.Frame(box); row3.pack(fill="x", padx=6, pady=4)
@@ -854,14 +854,29 @@ def launch_gui():
             self.var_range.set(f"当前频率范围参考：{range_text} MHz。{note}".strip())
 
         def do_cfg_read(self):
-            """读取 配置字节对，解析 PWR/TS/EXP。"""
+            """读取 配置字节对，解析 PWR/TS/EXP；已启用时一并读回功率上限（AC）。"""
             if not self.require_open(): return
             def job(cat):
                 b0, b1, r = cat.read_config_pair()
                 self.log("已读取功率与频率设置")
                 self._render_cfg(b0, b1, r)
                 self._q_append_text(self.txt_power, "已读取设备功率与频率设置。\n")
+                if self._cap("power_ac_write") and cat.ac_write_cfg().get("items"):
+                    self._read_power_limits(cat)
             self.bg(job)
+
+        def _read_power_limits(self, cat):
+            """Best-effort read of the configured power-limit (AC) items."""
+            items = cat.ac_write_cfg().get("items", []) or []
+            parts = []
+            for item in items:
+                label = str(item.get("label", ""))
+                try:
+                    parts.append(f"{label}={cat.ex_read(item.get('addr'))}")
+                except Exception as e:  # noqa: BLE001 - report per item
+                    parts.append(f"{label}=读取失败({e})")
+            if parts:
+                self._q_append_text(self.txt_power, "当前功率上限（AC）：" + "   ".join(parts) + "\n")
 
         def _need_cfg(self) -> bool:
             """预览/写入前要求先读取配置对，避免覆盖未知的 TS/EXP/AUX。"""
@@ -884,23 +899,26 @@ def launch_gui():
                 messagebox.showwarning(APP_TITLE, str(e))
 
         def do_pwr_write(self):
-            """Write only the power-class bits declared by the selected profile."""
+            """Write the power class and, when configured, the power limits (AC)."""
             if not self.require_open() or not self._need_cfg(): return
             if not self._cap("power_class_write"):
                 messagebox.showwarning(APP_TITLE, "当前机型配置未启用功率等级写入")
                 return
             try:
                 bits = pwr_bits_from_text(self.cmb_pwr.get(), self._profile_cfg())
+                label = self._power_label(bits)
                 b0, old = self.cfg_pair
                 new = (old & ~int(self._cfg('power', 'power_mask', 0))) | bits
             except Exception as e:
                 messagebox.showwarning(APP_TITLE, str(e)); return
+            ac_on = self._cap("power_ac_write") and bool(self.cat.ac_write_cfg().get("items"))
             if not self._require_backup_ack():
                 return
+            extra = "\n随后按当前机型配置写入功率上限（AC）。" if ac_on else ""
             if not messagebox.askyesno(
                     APP_TITLE,
-                    f"确认将功率等级设置为“{self._power_label(bits)}”？\n"
-                    "只修改功率等级，其他设备设置保持不变。写入后会自动回读确认；建议先备份。"):
+                    f"确认将功率等级设置为“{label}”？\n"
+                    f"只修改功率等级位，其他设置保持不变。{extra}写入后会自动回读确认；建议先备份。"):
                 return
             def job(cat):
                 cat.write_config_pair(b0, new)
@@ -908,7 +926,45 @@ def launch_gui():
                 self.log(f"功率等级已写入并回读：{self._power_label(b1b)}")
                 self._render_cfg(b0b, b1b, r)
                 self._q_append_text(self.txt_power, f"功率等级已写入并验证：{self._power_label(b1b)}。\n")
+                if ac_on:
+                    self._write_power_limits(cat, label)
             self.bg(job)
+
+        def _write_power_limits(self, cat, class_label):
+            """Write the configured power limits (AC) and report per-item readback."""
+            cfg = cat.ac_write_cfg()
+            try:
+                results = cat.write_power_limits(class_label)
+            except Exception as e:  # noqa: BLE001 - surface any transport error
+                self.log(f"✗ 功率上限（AC）写入失败：{e}")
+                self._q_append_text(self.txt_power, f"功率上限（AC）写入失败：{e}\n")
+                return
+            lines = [f"功率上限（AC）→ {class_label}："]
+            mismatched = 0
+            for item in results:
+                back, target = item.get("readback"), int(item["target"])
+                if item.get("error"):
+                    status = f"（写入被拒：{item['error']}）"
+                    mismatched += 1
+                elif back is None:
+                    status = "（未回读）"
+                    mismatched += 1
+                elif int(back) != target:
+                    status = f"（回读 {back} ≠ 目标 {target}）"
+                    mismatched += 1
+                else:
+                    status = f"= {back}"
+                lines.append(f"  {item['label']}：{target} {status}")
+            if mismatched:
+                lines.append("  部分项与目标不一致。EX 上限按设备当前档位夹取："
+                             "若刚改了档位，请整机断电重启后再写入。")
+            else:
+                note = str(cfg.get("reboot_note", "")).strip()
+                if note:
+                    lines.append(f"  {note}")
+            self.log(f"功率上限（AC）已写入：{class_label}（{len(results)} 项，"
+                     f"{len(results) - mismatched} 项一致）")
+            self._q_append_text(self.txt_power, "\n".join(lines) + "\n")
 
         def do_ts_preview(self):
             """只计算 TS/EXP 位目标值，不写设备。"""

@@ -44,7 +44,8 @@
     "levels": {},
     "ts_tables": {},
     "exp_table": [],
-    "status": "unverified"
+    "status": "unverified",
+    "ac_write": null
   },
   "settings_table": {
     "base_addr": null,
@@ -78,6 +79,7 @@
     "fram_full_read": false,
     "power_config_read": false,
     "power_class_write": false,
+    "power_ac_write": false,
     "ts_exp_write": false,
     "settings_table": false,
     "service_menu": false,

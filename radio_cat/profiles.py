@@ -97,6 +97,41 @@ def validate_profile(item: dict) -> None:
     for section in ("capabilities", "responses", "power", "settings_table", "dumps"):
         if section in item and not isinstance(item[section], dict):
             raise ValueError(f"{section} must be an object")
+    power_cfg = item.get("power", {})
+    if isinstance(power_cfg, dict) and power_cfg.get("ac_write") is not None:
+        _validate_ac_write(power_cfg.get("ac_write"), power_cfg.get("levels", {}))
+
+
+def _validate_ac_write(ac, levels) -> None:
+    """Validate an optional power-limit (AC) write block without inventing values."""
+    if not isinstance(ac, dict):
+        raise ValueError("power.ac_write must be an object")
+    items = ac.get("items")
+    if not isinstance(items, list) or not items:
+        raise ValueError("power.ac_write.items must be a non-empty list")
+    digits = ac.get("value_digits", 3)
+    if not isinstance(digits, int) or not 1 <= digits <= 6:
+        raise ValueError("power.ac_write.value_digits must be an integer 1..6")
+    for entry in items:
+        if not isinstance(entry, dict):
+            raise ValueError("each power.ac_write item must be an object")
+        addr = str(entry.get("addr", "")).strip().upper()
+        if not addr or len(addr) % 2 or any(c not in "0123456789ABCDEF" for c in addr):
+            raise ValueError("power.ac_write item addr must be even-length hex digits")
+        if not str(entry.get("label", "")).strip():
+            raise ValueError("power.ac_write item label is required")
+    targets = ac.get("targets")
+    if not isinstance(targets, dict) or not targets:
+        raise ValueError("power.ac_write.targets must be a non-empty object")
+    level_labels = {str(k) for k in levels} if isinstance(levels, dict) else set()
+    for label, values in targets.items():
+        if level_labels and str(label) not in level_labels:
+            raise ValueError(f"power.ac_write target {label!r} has no matching power level")
+        if not isinstance(values, list) or len(values) != len(items):
+            raise ValueError("power.ac_write target list length must match items")
+        for value in values:
+            if not isinstance(value, int) or not 0 <= value < 10 ** digits:
+                raise ValueError(f"power.ac_write target {value!r} is out of the {digits}-digit range")
 
 
 def load_rig_profiles() -> dict:

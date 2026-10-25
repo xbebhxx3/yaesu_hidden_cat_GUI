@@ -159,6 +159,7 @@
     "fd_write": false,
     "power_config_read": true,
     "power_class_write": true,
+    "power_ac_write": true,
     "kt_read": false,
     "fd_read": false,
     "kt_write": false,
@@ -200,7 +201,26 @@
       "10 W": "固件功率等级表：0x10 = 10 W 等级；实际输出上限仍受各频段设置限制。"
     },
     "ts_labels": {},
-    "note": "功率页只写 FRAM[0x0007] bit3-4 的功率等级位，不读写各频段 RF/MAX 功率上限；上限请在电台菜单中自行设置。",
+    "note": "本页写入功率等级与功率上限（AC）。",
+    "ac_write": {
+      "value_digits": 3,
+      "items": [
+        {"label": "HF SSB PWR", "addr": "1601"},
+        {"label": "HF AM PWR", "addr": "1602"},
+        {"label": "HF PWR", "addr": "1603"},
+        {"label": "50M SSB PWR", "addr": "1604"},
+        {"label": "50M AM PWR", "addr": "1605"},
+        {"label": "50M PWR", "addr": "1606"}
+      ],
+      "targets": {
+        "100 W": [100, 40, 100, 100, 40, 100],
+        "50 W": [50, 40, 50, 50, 40, 50],
+        "20 W": [10, 10, 10, 20, 20, 20],
+        "10 W": [10, 10, 10, 10, 10, 10]
+      },
+      "evidence": "CAT 手册（1707-B）EX/表 3：1601 HF SSB PWR 5–100、1602 HF AM PWR 5–40、1603 HF PWR 5–100、1604 50M SSB PWR 5–100、1605 50M AM PWR 5–40、1606 50M PWR 5–100，均为 3 位。固件 AH065_M_V0110 EX 处理函数 0x1A558 把菜单号 1601–1606 映射到写处理函数 0x6E9C/0x6ECA/0x6ED4/0x6EDE/0x6EE8/0x6EF2，写 RAM 0xFF8DCC–0xFF8DD1，即 FRAM[0x024C–0x0251]；档位区间表 0xC968。",
+      "reboot_note": "EX 写入按设备当前 RAM 档位夹取；刚改过档位时需整机断电重开，再写上限。"
+    },
     "band_frequency_hints": [
       {
         "name": "160 米业余频段参考",

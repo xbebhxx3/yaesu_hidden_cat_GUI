@@ -7,7 +7,7 @@ start,end,size,name,ram,confidence,evidence,purpose,values
 0x0009,0x000A,1,reserved,—,unknown,无引用（FTDX10 此处是设置版本）,保留,—（未确认；FTDX10 此处为设置版本）
 0x000A,0x0138,302,**internal settings blk0 (302B)**,0xFF8BA2,confirmed,块读写**长度 0x12E**（0x1648 读 / 0x24D8 写）→ 0x0A..0x137；SP 路径上界 <0x138（0x1D3A2）,内部设置块 0（302B）,302B 菜单/设置值；具体项未逐项列举；改前备份
 0x0138,0x0150,24,reserved,—,unknown,间隙,保留间隙,—（未确认）
-0x0150,0x02AE,350,**internal settings blk1 (350B)**,0xFF8CD0,confirmed,块读写**长度 0x15E**（0x1830/0x2552）；内含 0x150+0x96、0x1E6+0xC8 及功率字段,内部设置块 1（350B，含功率字段与 PE 校准）,0x024C-0x0251=6 个频段/模式的 RF 功率(PC)；0x0254-0x0257=MG 增益（上限 0x65=101，非功率）；0x0233-0x0244=PE TX AUDIO EQ/P-EQ（FREQ 0-7/0-9/0-18；LEVEL -20..+10；BWTH 1-10；详见 CONCLUSIONS.md）
+0x0150,0x02AE,350,**internal settings blk1 (350B)**,0xFF8CD0,confirmed,块读写**长度 0x15E**（0x1830/0x2552）；内含 0x150+0x96、0x1E6+0xC8 及功率字段,内部设置块 1（350B，含功率字段与 PE 校准）,0x024C-0x0251=6 个频段/模式的功率上限（PC 与标准 CAT EX 菜单 1601–1606 写同一段）；0x0254-0x0257=MG 增益（上限 0x65=101，非功率）；0x0233-0x0244=PE TX AUDIO EQ/P-EQ（FREQ 0-7/0-9/0-18；LEVEL -20..+10；BWTH 1-10；详见 CONCLUSIONS.md）
 0x02AE,0x05A6,760,reserved / undocumented,—,unknown,无即时基址引用,保留/未记录,—（未确认）
 0x05A6,0x06AA,260,**CW message 5×52B**,—,confirmed,0x229E 写 5×0x34 字节（模板 0x22C6）,CW 消息 5×52B,5 条 CW 消息，每条 52B（文本/长度按固件格式）
 0x06AA,0x07A4,250,**RTTY/PSK message 5×50B**,—,confirmed,0x2362 写 5×0x32 字节（模板 0x238E）,RTTY/PSK 消息 5×50B,5 条 RTTY/PSK 消息，每条 50B
