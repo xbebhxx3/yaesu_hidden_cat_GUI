@@ -20,6 +20,22 @@ python main.py --model ft891 --port /dev/ttyUSB0 --baud 38400 --backup backup.js
 
 FT-891 配置未声明通用默认波特率，因此命令行必须明确指定 `--baud`；示例中的 `38400` 只是命令格式示例，不是软件替设备选择的默认值。
 
+## 可执行文件
+
+生成物在`dist/`
+
+- `dist/yaesu-hedden-cat`：Linux x86-64
+- `dist/yaesu-hedden-cat.exe`：Windows x86-64
+
+重新打包：
+
+```bash
+./packaging/build-linux.sh     # Linux
+./packaging/build-windows.sh   # Windows（在 Linux 上通过 Wine 构建）
+```
+
+`build-windows.sh` 会在用户缓存目录（`${XDG_CACHE_HOME:-~/.cache}/yaesu-hedden-cat/`）中安装 Windows Python 3.12 + Tkinter，再运行 PyInstaller，需要 `wine`、`winepath`、`curl`、`rsync`。两个脚本都把构建用的第三方内容放在该缓存目录，打包后可删除
+
 ## 目录
 
 - `main.py`：唯一应用启动入口
@@ -30,6 +46,7 @@ FT-891 配置未声明通用默认波特率，因此命令行必须明确指定 
 - `radio_cat/profiles/*.json`：每个机型独立配置
 - `radio_cat/profiles/profile-template.json.example`：新增机型模板
 - `radio_cat/data/<model>/`：机型的 FRAM 映射、服务菜单数据与当前结论（`CONCLUSIONS.md`）
+- `packaging/`：PyInstaller spec 与 Linux/Windows 打包脚本
 
 ## 目前能力
 
@@ -62,7 +79,7 @@ FT-891 配置未声明通用默认波特率，因此命令行必须明确指定 
 - FTDX10 `JP0010<8hex>`：8hex 为 `v` + `~v`；`v` 低 5 位写入 `FRAM[0x0007]` bit0–4（TS/功率），bit5（EXP）保留、bit6–7（AUX）清零；`FRAM[0x0006]` 清零；随后写回 FRAM[0x0006/0x0007]，并把 RAM `0xFF9886` 的 5 字节目标参数写到 `FRAM[0x02F0–0x02F4]`。不复位，但副作用超出功率页范围。
 - FT-891 `JP0891<8hex>`：8hex 为 `v` + `~v`；`v` 低 5 位写入 `FRAM[0x0007]` bit0–4（TS/功率），bit5–7 保留；`FRAM[0x0006]` 原样写回；不复位。
 
-两款机型的 JP 写入均未做真机验证；本软件功率页只用 SPW 写功率等级位，JP 写入保持禁用
+两款机型的 JP 写入均未做真机验证；本软件功率页用 SPW 写功率等级位、用 EX 写功率上限，JP 写入保持禁用
 
 ### PE 校准（TX AUDIO EQ/P-EQ）
 
