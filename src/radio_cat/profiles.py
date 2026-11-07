@@ -23,8 +23,15 @@ def get_rig_value(profile: dict | None, section: str, key: str, default=None):
     return default
 
 
-def effective_ranges(ts: int, exp: bool, profile: dict | None = None):
+def effective_ranges(ts: int, exp: bool, profile: dict | None = None,
+                     mode_bits: int | None = None):
     power = profile.get("power", {}) if isinstance(profile, dict) else {}
+    if mode_bits is not None:
+        mode_tables = power.get("mode_tables", {})
+        if isinstance(mode_tables, dict):
+            table = mode_tables.get(str(mode_bits), mode_tables.get(mode_bits))
+            if table:
+                return table, f"mode=0x{int(mode_bits):02X}"
     if exp:
         return power.get("exp_table", []), "EXP=1"
     tables = power.get("ts_tables", {})
@@ -43,11 +50,6 @@ def pwr_bits_from_text(text: str, profile: dict | None = None) -> int:
 def fmt_ranges(segments) -> str:
     """把 [(低, 高), ...] 格式化为 “低-高 / 低-高” 的 MHz 文本。"""
     return " / ".join(f"{lo:g}-{hi:g}" for lo, hi in segments)
-
-
-def default_profiles() -> dict:
-    """No embedded rig data: model profiles must come from external JSON files."""
-    return {"format": "yaesu-hedden-cat-profiles", "version": 1, "profiles": []}
 
 
 def validate_profile(item: dict) -> None:
@@ -103,24 +105,30 @@ def validate_profile(item: dict) -> None:
 
 
 def _validate_ac_write(ac, levels) -> None:
-    """Validate an optional power-limit (AC) write block without inventing values."""
+    """Validate an optional power-limit (AC) write block without inventing values.
+
+    items/targets 全空表示“未配置”（模板占位就是这个形态），直接放行；
+    只要填了其中一项就必须成套：条目要有 label 与 FRAM 地址，目标值与条目等长。
+    """
     if not isinstance(ac, dict):
         raise ValueError("power.ac_write must be an object")
     items = ac.get("items")
+    targets = ac.get("targets")
+    if not items and not targets:
+        return
     if not isinstance(items, list) or not items:
         raise ValueError("power.ac_write.items must be a non-empty list")
-    digits = ac.get("value_digits", 3)
-    if not isinstance(digits, int) or not 1 <= digits <= 6:
-        raise ValueError("power.ac_write.value_digits must be an integer 1..6")
     for entry in items:
         if not isinstance(entry, dict):
             raise ValueError("each power.ac_write item must be an object")
-        addr = str(entry.get("addr", "")).strip().upper()
-        if not addr or len(addr) % 2 or any(c not in "0123456789ABCDEF" for c in addr):
-            raise ValueError("power.ac_write item addr must be even-length hex digits")
         if not str(entry.get("label", "")).strip():
             raise ValueError("power.ac_write item label is required")
-    targets = ac.get("targets")
+        try:
+            addr = int(str(entry.get("addr", "")), 16)
+        except ValueError:
+            raise ValueError("power.ac_write item addr must be a FRAM hex address")
+        if not 0 <= addr <= 0xFFFF:
+            raise ValueError("power.ac_write item addr must be within 0x0000-0xFFFF")
     if not isinstance(targets, dict) or not targets:
         raise ValueError("power.ac_write.targets must be a non-empty object")
     level_labels = {str(k) for k in levels} if isinstance(levels, dict) else set()
@@ -130,8 +138,8 @@ def _validate_ac_write(ac, levels) -> None:
         if not isinstance(values, list) or len(values) != len(items):
             raise ValueError("power.ac_write target list length must match items")
         for value in values:
-            if not isinstance(value, int) or not 0 <= value < 10 ** digits:
-                raise ValueError(f"power.ac_write target {value!r} is out of the {digits}-digit range")
+            if not isinstance(value, int) or not 0 <= value <= 0xFF:
+                raise ValueError(f"power.ac_write target {value!r} is out of the 0-255 range")
 
 
 def load_rig_profiles() -> dict:
@@ -156,9 +164,8 @@ def save_rig_profiles(obj: dict) -> None:
     """Save each profile as an independent JSON file; never overwrite other models."""
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     for item in obj.get("profiles", []):
+        validate_profile(item)   # 结构不合法的配置直接拒绝，不写盘
         pid = str(item.get("id", "")).strip()
-        if not pid or not re.fullmatch(r"[A-Za-z0-9_-]+", pid):
-            raise ValueError(f"非法机型配置 id: {pid!r}")
         path = PROFILE_DIR / f"{pid}.json"
         with path.open("w", encoding="utf-8") as fp:
             json.dump(item, fp, ensure_ascii=False, indent=2)
@@ -202,17 +209,24 @@ def load_service_items(profile: dict | None = None) -> list[dict]:
     rows = []
     with open(path, encoding="utf-8-sig", newline="") as fp:
         for row in csv.DictReader(fp):
+            # CSV 模板的默认值 null 表示“未填”，按空值处理
+            for key, value in list(row.items()):
+                if str(value).strip().lower() == "null":
+                    row[key] = ""
             try:
                 row["n"] = int(row["code_dec"])
                 row["item_addr"] = int(row["item_fram"], 16)
                 row["apply_addr"] = int(row["apply_fram"], 16)
-                band_text = str(row.get("band_mhz", "")).strip()
-                row["band_mhz_f"] = float(band_text) if band_text else None
-                # Empty labels are deliberately shown as missing evidence, never invented.
-                if not str(row.get("label", "")).strip():
-                    row["label"] = "标签未提供（未猜测）"
             except Exception:
                 continue
+            band_text = str(row.get("band_mhz", "")).strip()
+            try:
+                row["band_mhz_f"] = float(band_text) if band_text else None
+            except ValueError:
+                row["band_mhz_f"] = None
+            # Empty labels are deliberately shown as missing evidence, never invented.
+            if not str(row.get("label", "")).strip():
+                row["label"] = "标签未提供"
             rows.append(row)
     return rows
 

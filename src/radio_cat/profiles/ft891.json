@@ -1,0 +1,182 @@
+{
+  "id": "ft891",
+  "name": "Yaesu FT-891 (MAIN V0110)",
+  "cat_id": "0650",
+  "ve_magic": "RAH065H",
+  "ve_full": "VERAH065H",
+  "status": "CAT/FRAM 静态分析 / 真机未验证",
+  "magic_status": "固件静态确认 / 真机未验证（VE/JP/ZZ）",
+  "magic_evidence": "0891",
+  "notes": "依据FT-891 AH065_M_V0110 固件分析：ID=0650(7B)、VE 30B、JP 15B、E0 227B、E8 10570B、内部设置表 302B@0x0A-0x137、SPMTR 14B、PE 9B。",
+  "capabilities": {
+    "service_menu": false,
+    "pe_calibration": false,
+    "full_backup": false,
+    "spa_we": true,
+    "spa_rd": true,
+    "spa_cl": true,
+    "spa_et": false,
+    "spsdr": false,
+    "spm_tr": true,
+    "spm_t2": false,
+    "ts_exp_write": true,
+    "settings_table": true,
+    "fram_full_read": true,
+    "quick_commands": true,
+    "fram_raw_access": true,
+    "fram_raw_write": true,
+    "jp_write": true,
+    "service_mode": false,
+    "fd_write": false,
+    "power_config_read": true,
+    "power_class_write": true,
+    "power_ac_write": false,
+    "kt_read": false,
+    "fd_read": false,
+    "kt_write": false,
+    "ek": false,
+    "eo": false
+  },
+  "serial": {
+    "baud_default": 4800,
+    "data_bits": 8,
+    "parity": "N",
+    "stop_bits": 2,
+    "evidence": "波特率由电台 CAT RATE 菜单决定。",
+    "flow_control_mode": "none"
+  },
+  "fram": {
+    "address_min": 0,
+    "address_max": 32767,
+    "config_pair_addr": 6
+  },
+  "power": {
+    "levels": {
+      "100 W": 24,
+      "50 W": 0,
+      "20 W": 8,
+      "10 W": 16
+    },
+    "ts_labels": {
+      "0": "TS0 标准 HF/50M",
+      "1": "TS1 标准 HF/50M",
+      "2": "TS2 5 MHz 宽（5.25–5.4065）",
+      "3": "TS3 5 MHz 窄（WRC-15）",
+      "4": "TS4 窄 160/80/40 m",
+      "5": "TS5 标准 HF/50M",
+      "6": "TS6 标准 HF/50M",
+      "7": "TS7 最宽 HF + 5 MHz 窄"
+    },
+    "ts_note": "FT-891 的 8 张 TS 表均有效：选择器 0x26C8A 直接用 bit0-2 索引 0x26CE8 指针表。5 MHz 仅 TS2（5.25–5.4065）与 TS3/7（5.3515–5.3665）。",
+    "ac_write": {
+      "items": [
+        {"label": "HF SSB PWR", "addr": "0x024C"},
+        {"label": "HF AM PWR", "addr": "0x024D"},
+        {"label": "HF PWR", "addr": "0x024E"},
+        {"label": "50M SSB PWR", "addr": "0x024F"},
+        {"label": "50M AM PWR", "addr": "0x0250"},
+        {"label": "50M PWR", "addr": "0x0251"}
+      ],
+      "targets": {
+        "100 W": [100, 40, 100, 100, 40, 100],
+        "50 W": [50, 40, 50, 50, 40, 50],
+        "20 W": [10, 10, 10, 20, 20, 20],
+        "10 W": [10, 10, 10, 10, 10, 10]
+      },
+      "evidence": "每模式功率值 FRAM[0x024C–0x0251]（RAM 0xFF8DCC–0xFF8DD1），与 CAT PC、标准 CAT EX 菜单 1601–1606 写同一段。按文档用 SPW 写入：写处理函数 0x1D28A 随后走 0x1636 → 0x258a 重载 FRAM[0x01E6–0x02AE] 设置块到 RAM，值立即生效，不按档位区间夹取；档位区间表 0xC968 只用于菜单/PC/EX 校验。",
+      "reboot_note": "功率等级需整机断电重开才生效；功率值随 SPW 写入即时生效。"
+    },
+    "band_frequency_hints": [
+      {"name": "160 米业余频段参考", "range_mhz": "1.800–2.000"},
+      {"name": "80 米业余频段参考", "range_mhz": "3.500–4.000"},
+      {"name": "40 米业余频段参考", "range_mhz": "7.000–7.300"},
+      {"name": "30 米业余频段参考", "range_mhz": "10.100–10.150"},
+      {"name": "20 米业余频段参考", "range_mhz": "14.000–14.350"},
+      {"name": "17 米业余频段参考", "range_mhz": "18.068–18.168"},
+      {"name": "15 米业余频段参考", "range_mhz": "21.000–21.450"},
+      {"name": "12 米业余频段参考", "range_mhz": "24.890–24.990"},
+      {"name": "10 米业余频段参考", "range_mhz": "28.000–29.700"},
+      {"name": "6 米业余频段参考", "range_mhz": "50.000–54.000"}
+    ],
+    "band_frequency_hint_note": "通用业余频段参考，不代表本机可用范围或地区许可。",
+    "config_pair_addr": 6,
+    "power_mask": 24,
+    "ts_mask": 7,
+    "exp_bit": 64,
+    "exp_mask": 96,
+    "exp_value": 64,
+    "exp_note": "频段表模式是 bit6:bit5 两比特（0x00=按 TS、0x20=宽 HF、0x40=EXP 等价 1.8–30 + 50–54、0x60=1.8–56）。勾选 EXP 会写 0x40 并清 bit5。菜单保存/复位会用硬件端口 0xFFFF4D 的 bit5-6 覆盖该字节，写入后必须整机断电重开。",
+    "range_note": "范围来自 FT-891 固件频段表（选择器 0x26C8A，8 张 TS 表 + 0x26D12 宽频 + 0x26D24 宽 HF + 0x26D08 服务表）；服务模式 0xFF2023.7 优先级最高。",
+    "mode_labels": {
+      "0": "TS 频段组合",
+      "32": "宽 HF（1.8–30 有缺口 + 50–54）",
+      "64": "EXP 等价（1.8–30 + 50–54）",
+      "96": "服务模式范围（1.8–56）"
+    },
+    "ts_tables": {
+      "0": [[1.8, 2.0], [3.5, 4.0], [7.0, 7.3], [10.1, 10.15], [14.0, 14.35], [18.068, 18.168], [21.0, 21.45], [24.89, 24.99], [28.0, 29.7], [50.0, 54.0]],
+      "1": [[1.8, 2.0], [3.5, 4.0], [7.0, 7.3], [10.1, 10.15], [14.0, 14.35], [18.068, 18.168], [21.0, 21.45], [24.89, 24.99], [28.0, 29.7], [50.0, 54.0]],
+      "2": [[1.81, 2.0], [3.5, 3.8], [5.25, 5.4065], [7.0, 7.2], [10.1, 10.15], [14.0, 14.35], [18.068, 18.168], [21.0, 21.45], [24.89, 24.99], [28.0, 29.7], [50.0, 52.0]],
+      "3": [[1.8, 2.0], [3.5, 3.8], [5.3515, 5.3665], [7.0, 7.2], [10.1, 10.15], [14.0, 14.35], [18.068, 18.168], [21.0, 21.45], [24.89, 24.99], [28.0, 29.7], [50.0, 52.0]],
+      "4": [[1.83, 1.85], [3.5, 3.8], [7.0, 7.1], [10.1, 10.15], [14.0, 14.35], [18.068, 18.168], [21.0, 21.45], [24.89, 24.99], [28.0, 29.7], [50.0, 52.0]],
+      "5": [[1.8, 2.0], [3.5, 4.0], [7.0, 7.3], [10.1, 10.15], [14.0, 14.35], [18.068, 18.168], [21.0, 21.45], [24.89, 24.99], [28.0, 29.7], [50.0, 54.0]],
+      "6": [[1.8, 2.0], [3.5, 4.0], [7.0, 7.3], [10.1, 10.15], [14.0, 14.35], [18.068, 18.168], [21.0, 21.45], [24.89, 24.99], [28.0, 29.7], [50.0, 54.0]],
+      "7": [[1.8, 2.0], [3.5, 4.0], [5.3515, 5.3665], [7.0, 7.5], [10.0, 10.5], [14.0, 14.5], [18.0, 18.5], [21.0, 21.5], [24.5, 25.0], [28.0, 30.0], [50.0, 54.0]]
+    },
+    "exp_table": [[1.8, 30.0], [50.0, 54.0]],
+    "mode_tables": {
+      "32": [[1.8, 2.0], [3.5, 4.0], [7.0, 7.5], [10.0, 10.5], [14.0, 14.5], [18.0, 18.5], [21.0, 21.5], [24.5, 25.0], [28.0, 30.0], [50.0, 54.0]],
+      "64": [[1.8, 30.0], [50.0, 54.0]],
+      "96": [[1.8, 56.0]]
+    }
+  },
+  "settings_table": {
+    "base_addr": 16747426,
+    "start_addr": 10,
+    "end_addr": 311,
+    "length": 302,
+    "evidence": "AH065_M_V0110 SPw/SPr 路径：地址 0x0A..0x137（cmp.w #0xA / #0x138），RAM 镜像基址 0xFF8BA2；SPARD 回 5+302+2=309 字节。"
+  },
+  "dumps": {
+    "e0_length": 227,
+    "e8_length": 10570
+  },
+  "data_files": {
+    "fram_map": "data/ft891/fram_map.csv",
+    "service_items": null
+  },
+  "responses": {
+    "id_length": 7,
+    "ve_length": 30,
+    "jp_length": 15,
+    "fd_length": null,
+    "kt_length": null,
+    "spm_tr_length": 14,
+    "spm_t2_length": null,
+    "spn_length": 7,
+    "pe_length": 9,
+    "spsdr_length": null,
+    "evidence": "AH065_M_V0110：ID 0x1A8A2→7B；VE 0x1D642→0x1E=30B；JP 0x19728 读分支 0x19822→0x0F=15B；SPMTR 0x1D43E→0x0E=14B；SPN 0x1D596 读分支→7B；PE 0x1BF1E 读分支 0x1C3B2→0x09=9B。FD/KT/SPMT2/SPSDR 在 FT-891 命令表中不存在；PE 映射已确认为 TX AUDIO EQ/P-EQ，但本软件未开放 FT-891 PE 写入/校准。"
+  },
+  "pe_calibration": {
+    "selectors": [],
+    "address_start": 16747955,
+    "address_end": 16747972,
+    "note": "PE 映射已确认为 TX AUDIO EQ/P-EQ，还需检查写入格式，故 PE 保持禁用。",
+    "selector_positions": [[0, 2], [0, 1, 2], [0, 1, 2]]
+  },
+  "service_menu": {
+    "item_count": 226,
+    "index_addr": null,
+    "subcode_addr": null,
+    "apply_kind_labels": {}
+  },
+  "service_mode": {
+    "enter_value": 0,
+    "enter_description": "静态确认 ZZPE089100; 把 0 写入 0xFF2001 并软复位；下次启动 0x13F4 分派到 0x1536，置 0xFF2023.7（服务模式），频段表选择器改用 0x26D08 = 1.8–56 MHz。ZZPE089101; 走 0x1560 → 0x2424（恢复/初始化设置）；ZZPE089102; 走 0x14F2 → 0xA88，用硬件端口 0xFFFF4D 整字节重写配置对。",
+    "reset_warning": "三个入口都会复位；1/2 会重写配置对，可能覆盖手工设置的 TS/功率/模式位。本软件不提供。"
+  },
+  "jp_write_status": "enabled_unverified",
+  "jp_write_note": "JP 写入语义已静态确认、未做真机验证，写前先备份。",
+  "service_code": "0891"
+}

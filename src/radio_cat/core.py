@@ -33,9 +33,13 @@ BACKUP_FORMAT = "yaesu-full-backup"
 BACKUP_VERSION = 1
 MANUAL_PROFILE_NAME = "自定义（手动输入）"
 
+_HEX_LINE_RE = re.compile(r"^(?:0x)?([0-9A-Fa-f]{1,4})\s*:\s*(.*)$")
+_HEX_TAIL_RE = re.compile(r"\s{2,}")
+
+# 机型配置 API 在此重新导出，UI 与命令行统一从 core 取用
 from .profiles import (
-    APP_DIR, PROFILE_DIR, PROFILES_PATH, get_rig_value, effective_ranges,
-    pwr_bits_from_text, fmt_ranges, default_profiles, validate_profile,
+    PROFILES_PATH, get_rig_value, effective_ranges,
+    pwr_bits_from_text, fmt_ranges,
     load_rig_profiles, save_rig_profiles, load_fram_regions, load_service_items,
 )
 
@@ -50,13 +54,13 @@ def parse_hex_dump(text: str) -> list[tuple[int, bytes]]:
         line = line.strip()
         if not line or line.startswith(("#", "//")):
             continue
-        m = re.match(r"^(?:0x)?([0-9A-Fa-f]{1,4})\s*:\s*(.*)$", line)
+        m = _HEX_LINE_RE.match(line)
         if not m:
             raise ValueError(f"无法解析行（需要 AAAA: 00 11 …）: {line}")
         addr = int(m.group(1), 16)
         body = m.group(2)
         # 截掉常见的行尾 ASCII 区（两个以上空格后接可打印文本）
-        body = re.split(r"\s{2,}", body, maxsplit=1)[0]
+        body = _HEX_TAIL_RE.split(body, maxsplit=1)[0]
         try:
             data = bytes.fromhex(body.replace(" ", ""))
         except ValueError as exc:
@@ -77,21 +81,32 @@ class CatTimeout(CatError):
     pass
 
 # ------------------------------------------------------------------ 帧构造
-def sp_frame(body: bytes, allow_terminator: bool = True) -> bytes:
-    """构造 SP 二进制帧：
-    默认允许 0x3B；需要严格排查时可显式传
-    allow_terminator=False。
-    """
+def sp_frame(body: bytes) -> bytes:
+    """构造 SP 二进制帧。"""
     head = b"SP" + bytes(body)
     chk = sum(head) & 0xFF
-    frame = head + bytes([chk]) + b";"
-    if not allow_terminator and 0x3B in frame[:-1]:
-        raise CatError("SP 帧参数或校验包含 0x3B (';')，已拒绝发送；请换地址/值")
-    return frame
+    return head + bytes([chk]) + b";"
 
 
 def hexs(b: bytes, sep: str = " ") -> str:
-    return sep.join(f"{x:02X}" for x in b)
+    """把字节串格式化为大写十六进制文本。
+
+    sep 为字节之间的分隔符，空串表示不加分隔。单字符分隔走 bytes.hex() 快速路径。
+    """
+    if len(sep) == 1:
+        return b.hex(sep).upper()
+    s = b.hex()
+    return (sep.join(s[i:i + 2] for i in range(0, len(s), 2)) if sep else s).upper()
+
+
+def ascii_view(b: bytes) -> str:
+    """字节串的可读 ASCII 视图；不可打印字符显示为 '.'。"""
+    return "".join(chr(x) if 0x20 <= x <= 0x7E else "." for x in b)
+
+
+def hexs_ascii(b: bytes, sep: str = " ") -> str:
+    """十六进制文本后附可读 ASCII 视图，例如 “41 49 30 3B  |AI0;|”。"""
+    return f"{hexs(b, sep)}  |{ascii_view(b)}|"
 
 
 # ------------------------------------------------------- 按钮悬浮说明
@@ -122,7 +137,6 @@ BUTTON_TIPS = {
     "EO 微调 (a,sign,b,ddd)": "发送 EO<a><sign><b><ddd>;（如 0+0000）做 32 位偏移/微调。写操作。",
     "高级频率偏移微调": "发送 EO<a><sign><b><ddd>;（如 0+0000）做 32 位偏移/微调。写操作。",
     "JP 读 (当前前缀)": "发送当前 JP 前缀（请检查当前机型配置），读取当前机型配置长度的启动/服务参数。只读。",
-    "JP 写 (互补 8 hex)": "发送 JP 前缀+8hex；写入配置对/参数，前后两字须互补（v^w==0xFFFF）。写操作，风险较高。",
     "E0 读取": "发送 E0; 读取当前配置声明长度的诊断数据。只读。",
     "E8 读取": "发送 E8; 读取当前配置声明长度的转储。只读。",
     "SPARD 读取": "SP 帧 ARD：读取当前配置声明的设置表；通常需要先进入服务模式。只读。",
@@ -149,13 +163,12 @@ BUTTON_TIPS = {
     "读取 ID": "发送 ID; 核对实机 CAT ID 是否与预设一致。",
     "读取 VE 版本": "发送 VE+魔术串，读取当前机型配置长度的版本串。",
     "JP 读取": "发送当前 JP 前缀（请检查当前机型配置），读取当前机型配置长度并解析互补字。",
-    "JP 写入": "发送 JP 前缀+8hex；两个 16 位字必须互补；写入会改配置对/参数，风险高。",
-    "JP 写入（未开放）": "当前机型存在未验证副作用或未确认安全写入值，写入保持禁用。",
+    "JP 写入": "写入 JP 前缀 + 8hex；两个 16 位字必须互补。会改配置对与 TS/功率位并有副作用，须先备份，写后回读。",
     "JP 写入（不支持）": "当前机型配置未声明 JP 写入能力。",
     "JP 写入（未验证，禁用）": "当前机型 JP 写入存在未验证副作用或未做真机验证，写入保持禁用。",
     "读取配置": "读取当前配置定义的配置字节并按其位掩码解析。",
     "预览功率等级": "只计算功率等级位目标值，不写设备。",
-    "写入功率等级": "写入功率等级位（保留其他位并回读）；当前机型配置了功率上限（AC）时，再用标准 CAT EX 写入各上限项并逐项回读。",
+    "写入功率等级": "写入功率等级位（保留其他位并回读）；当前机型配置了功率上限（AC）时，再用 SPW 写入各上限项并逐项回读。",
     "预览 TS/EXP": "只计算 TS/EXP 位目标值，不写设备，会显示参考频率范围。",
     "写入 TS/EXP": "按当前配置定义的 TS/EXP 位写入。",
     "进入服务模式 / 临时宽频（会复位）": "发送当前机型配置定义的服务模式命令；可能立即复位设备。",
@@ -368,6 +381,7 @@ class HoverToolTip:
 class SerialLink:
     def __init__(self):
         self.ser = None
+        self._rx = bytearray()   # 收包缓冲：拆掉一次读取超出回包的字节
         self.lock = threading.RLock()
         self.port = None
         self.baud = None
@@ -375,6 +389,8 @@ class SerialLink:
         self.bytesize = None
         self.parity = None
         self.flow_control_mode = None
+        # True when connect-time AI0; must be undone with AI1; on close.
+        self.restore_ai_on_close = False
 
     @property
     def is_open(self) -> bool:
@@ -405,18 +421,33 @@ class SerialLink:
         self.port, self.baud, self.stopbits = port, baud, stopbits
         self.bytesize, self.parity, self.flow_control_mode = bytesize, parity, mode
 
-    def close(self):
-        if self.ser is not None:
-            try:
-                self.ser.close()
-            except Exception:
-                pass
-        self.ser = None
+    def close(self) -> bool:
+        """Close the port; return True if AI1; was sent to restore AI state."""
+        restored = False
+        with self.lock:
+            if self.ser is not None:
+                if self.restore_ai_on_close:
+                    try:
+                        self.ser.write(b"AI1;")
+                        self.ser.flush()
+                        time.sleep(0.1)
+                        restored = True
+                    except Exception:
+                        pass
+                    self.restore_ai_on_close = False
+                try:
+                    self.ser.close()
+                except Exception:
+                    pass
+            self.ser = None
+            self._rx.clear()
+        return restored
 
     def write(self, data: bytes):
         if not self.is_open:
             raise CatNotOpen("串口未打开")
         with self.lock:
+            self._rx.clear()          # 上一条命令的残留字节不参与新回包
             self.ser.reset_input_buffer()
             self.ser.write(data)
             self.ser.flush()
@@ -427,38 +458,61 @@ class SerialLink:
         except Exception:
             return b""
 
+    def _read_available(self) -> bytes:
+        """读取当前已到达的字节；没有数据就等待最多一个串口超时。"""
+        try:
+            n = self.ser.in_waiting or 1
+        except Exception:
+            n = 1
+        return self._read_some(n)
+
     def read_exact(self, n: int, timeout: float) -> bytes:
         if not self.is_open:
             raise CatNotOpen("串口未打开")
-        end = time.time() + timeout
-        buf = bytearray()
-        while len(buf) < n and time.time() < end:
-            c = self._read_some(n - len(buf))
-            if c:
-                buf += c
+        end = time.monotonic() + timeout
+        buf = self._rx
+        while len(buf) < n and time.monotonic() < end:
+            chunk = self._read_some(n - len(buf))
+            if chunk:
+                buf += chunk
         if len(buf) < n:
-            raise CatTimeout(f"期望 {n} 字节，仅收到 {len(buf)}；已收: {hexs(bytes(buf))}")
-        return bytes(buf)
+            out = bytes(buf)
+            buf.clear()
+            raise CatTimeout(f"期望 {n} 字节，仅收到 {len(out)}；已收: {hexs(out)}")
+        out = bytes(buf[:n])
+        del buf[:n]                       # 多收的字节留在缓冲区给下一次读取
+        return out
 
     def read_until(self, term: bytes, timeout: float) -> bytes:
-        end = time.time() + timeout
-        buf = bytearray()
-        while time.time() < end:
-            c = self._read_some(1)
-            if c:
-                buf += c
-                if c == term:
-                    break
-        return bytes(buf)
+        """读到 term 为止（包含 term）；超时返回已收内容。"""
+        end = time.monotonic() + timeout
+        buf = self._rx
+        idx = buf.find(term)
+        while idx < 0 and time.monotonic() < end:
+            chunk = self._read_available()
+            if chunk:
+                buf += chunk
+                idx = buf.find(term)
+        if idx >= 0:
+            stop = idx + len(term)
+            out = bytes(buf[:stop])
+            del buf[:stop]
+            return out
+        out = bytes(buf)
+        buf.clear()
+        return out
 
     def drain(self, seconds: float) -> bytes:
-        end = time.time() + seconds
-        buf = bytearray()
-        while time.time() < end:
-            c = self._read_some(256)
-            if c:
-                buf += c
-        return bytes(buf)
+        """收完 seconds 窗口内的全部字节。"""
+        end = time.monotonic() + seconds
+        buf = self._rx
+        while time.monotonic() < end:
+            chunk = self._read_available()
+            if chunk:
+                buf += chunk
+        out = bytes(buf)
+        buf.clear()
+        return out
 
 
 # ============================================================ 协议封装
@@ -509,6 +563,29 @@ class HiddenCat:
                 raise ValueError("ZZ 前缀必须是 6 个 ASCII 字符（可粘贴完整 ZZ 命令）")
             self.zz_prefix = z
 
+    # ---- AI（Auto Information） ----
+    def ai_read(self) -> bytes:
+        """发送 AI;，返回短窗口内的原始回包（AI0; / AI1;）。"""
+        self.link.write(b"AI;")
+        return self.link.drain(0.4)
+
+    def ai_set(self, enabled: bool) -> bytes:
+        """发送 AI0; / AI1; 并返回短窗口内的原始回包。"""
+        self.link.write(b"AI1;" if enabled else b"AI0;")
+        return self.link.drain(0.3)
+
+    def prepare_serial_session(self) -> None:
+        """连接后检查 AI 自动信息；若已开启则关闭，并安排断开时恢复。"""
+        r = self.ai_read()
+        if b"AI1" in r:
+            self.ai_set(False)
+            self.link.restore_ai_on_close = True
+            self.log("检测到 AI 自动信息已开启，已发送 AI0; 关闭；断开时自动恢复 AI1;")
+        elif b"AI0" in r:
+            self.log("AI 自动信息当前为关闭（AI0;）")
+        else:
+            self.log(f"AI 状态未识别（回包: {hexs(r) if r else '无'}）；不修改")
+
     # ---- 底层 ----
     def _t_for(self, nbytes: int, base: float = 0.6) -> float:
         baud = self.link.baud or 1
@@ -523,8 +600,8 @@ class HiddenCat:
             return self.link.read_until(b";", timeout or self._t_for(32, 0.5))
         return self.link.read_exact(expect, timeout or self._t_for(expect, 0.6))
 
-    def _sp(self, body: bytes, expect, timeout=None, allow_terminator=False) -> bytes:
-        self.link.write(sp_frame(body, allow_terminator=allow_terminator))
+    def _sp(self, body: bytes, expect, timeout=None) -> bytes:
+        self.link.write(sp_frame(body))
         if expect == -1:
             return self.link.drain(timeout or 0.25)
         if expect is None:
@@ -601,8 +678,6 @@ class HiddenCat:
             raise ValueError("文本为空")
         if any(ord(ch) > 0x7F for ch in text):
             raise ValueError("KT 文本只接受 ASCII 字符")
-        if ";" in text:
-            raise ValueError("KT 文本不能包含 ';'（0x3B 会被当作帧尾）")
         text = text.upper()  # CAT 解析器默认把字母大写化
         if len(text) > 30:
             raise ValueError("文本超过 30 字符上限")
@@ -691,47 +766,18 @@ class HiddenCat:
             raise CatError("当前机型配置未提供已确认的 E8 转储长度")
         return self._ascii("E8", expect=n, timeout=self._t_for(n, 3.0))
 
-    # ---- EX（标准 CAT 菜单读写；用于功率上限 AC） ----
-    @staticmethod
-    def _norm_ex_addr(addr) -> str:
-        a = str(addr).strip().upper()
-        if not a or len(a) % 2 or any(c not in "0123456789ABCDEF" for c in a):
-            raise ValueError("EX 菜单地址必须是偶数位十六进制字符")
-        return a
+    # ---- FRAM 单字节读写（SPW 成对写，写后固件重载设置块） ----
+    def read_fram_byte(self, addr: int) -> int:
+        """读外部 FRAM 单字节（SPR 成对读）。"""
+        base = int(addr) & ~1
+        return self.spr(base)[5 + (int(addr) & 1)]
 
-    def ex_read(self, addr) -> int:
-        """EX 菜单读取：发送 EX<地址>;，回包为 <地址回显><数值>;。"""
-        a = self._norm_ex_addr(addr)
-        r = self._ascii("EX" + a, expect=None, timeout=self._t_for(32, 0.6))
-        if self._err(r):
-            raise CatError(f"EX 读取被拒绝（{a}）")
-        body = r.decode("ascii", "replace")
-        prefix = "EX" + a
-        if not body.startswith(prefix):
-            raise CatError(f"EX 回包异常: {hexs(r)}")
-        val = body[len(prefix):].rstrip(";").strip()
-        if not val.isdigit():
-            raise CatError(f"EX 回包数值解析失败: {body!r}")
-        return int(val)
-
-    def ex_set(self, addr, value: int, digits: int = 3) -> bytes:
-        """EX 菜单写入：发送 EX<地址><数值>;，成功回 A;，失败回 ?;。
-
-        EX 菜单项由固件按当前档位区间校验；超出当前功率等级上限时返回 ?;。
-        """
-        a = self._norm_ex_addr(addr)
-        digits = int(digits)
-        value = int(value)
-        if not (0 <= value < 10 ** digits):
-            raise ValueError(f"EX 数值超出 {digits} 位范围")
-        r = self._ascii("EX" + a + f"{value:0{digits}d}", expect=2)
-        if self._err(r):
-            raise CatError(
-                f"EX 写入被拒绝（{a}={value}）：可能超出设备当前档位上限；"
-                "刚改过档位时需断电重启再写")
-        if not self._ok(r):
-            raise CatError(f"EX 写入未确认: {hexs(r)}")
-        return r
+    def write_fram_byte(self, addr: int, value: int) -> bytes:
+        """写外部 FRAM 单字节：同对另一字节读回后原样保留（SPW 成对写）。"""
+        base = int(addr) & ~1
+        pair = list(self.spr(base)[5:7])
+        pair[int(addr) & 1] = int(value) & 0xFF
+        return self.spw(base, pair[0], pair[1])
 
     def ac_write_cfg(self) -> dict:
         """当前机型声明的功率上限（AC）写入配置；未启用时返回空字典。"""
@@ -747,30 +793,30 @@ class HiddenCat:
         return [int(v) for v in targets[key]]
 
     def write_power_limits(self, class_label: str, progress=None) -> list[dict]:
-        """按当前机型配置写入各功率上限项（标准 CAT EX），并逐项回读。
+        """按机型配置把功率上限（AC）写入外部 FRAM（SPW），并逐项回读。
 
-        返回 [{label, addr, target, readback, error}, ...]；即使某项被固件
-        拒绝（如超出当前档位上限）也会继续写其余项，便于一次性看到结果。
+        SPW 写入后固件重载设置块，值立即生效，不受当前档位区间夹取。
+        返回 [{label, addr, target, readback, error}, ...]；单项失败不影响其余项。
         """
-        cfg = self.ac_write_cfg()
-        items = list(cfg.get("items", []) or [])
+        if not get_rig_value(self.profile, "capabilities", "power_ac_write", False):
+            raise CatError("当前机型未启用功率上限（AC）写入")
+        items = list(self.ac_write_cfg().get("items", []) or [])
         if not items:
             raise CatError("当前机型未配置可写的功率上限项")
         values = self.ac_targets(class_label)
         if len(items) != len(values):
             raise CatError("功率上限项数与目标值数量不一致")
-        digits = int(cfg.get("value_digits", 3))
         results = []
         for i, (item, value) in enumerate(zip(items, values)):
-            addr = item.get("addr")
-            entry = {"label": str(item.get("label", "")), "addr": str(addr),
+            addr = int(str(item.get("addr", "")), 16)
+            entry = {"label": str(item.get("label", "")), "addr": f"0x{addr:04X}",
                      "target": int(value), "readback": None, "error": None}
             try:
-                self.ex_set(addr, int(value), digits)
+                self.write_fram_byte(addr, int(value))
             except CatError as exc:
                 entry["error"] = str(exc)
             try:
-                entry["readback"] = self.ex_read(addr)
+                entry["readback"] = self.read_fram_byte(addr)
             except CatError:
                 entry["readback"] = None
             results.append(entry)
@@ -846,7 +892,7 @@ class HiddenCat:
         max_addr = int(get_rig_value(self.profile, "fram", "address_max", -1))
         if not (min_addr <= addr <= max_addr):
             raise ValueError(f"地址须在当前机型 FRAM 范围内 (0x{min_addr:04X}–0x{max_addr:04X})")
-        r = self._sp(bytes([0x52, addr >> 8, addr & 0xFF]), 9, allow_terminator=True)
+        r = self._sp(bytes([0x52, addr >> 8, addr & 0xFF]), 9)
         return self._validate_sp_read(r, b"SPR", addr)
 
     def spw_table(self, addr: int, data: int, pad: int = 0x00) -> bytes:
@@ -864,7 +910,7 @@ class HiddenCat:
         end = get_rig_value(self.profile, "settings_table", "end_addr")
         if addr != 0xFFFF and (start is None or end is None or not (int(start) <= addr <= int(end))):
             raise ValueError("当前机型未配置此设置表地址，或地址超出范围")
-        r = self._sp(bytes([0x72, addr >> 8, addr & 0xFF]), 9, allow_terminator=True)
+        r = self._sp(bytes([0x72, addr >> 8, addr & 0xFF]), 9)
         return self._validate_sp_read(r, b"SPr", addr)
 
     def spm(self, which: str) -> bytes:
@@ -874,20 +920,20 @@ class HiddenCat:
                 raise CatError("当前机型配置未声明支持 SPMTR")
             n = int(get_rig_value(self.profile, "responses", "spm_tr_length", 0))
             if n <= 0: raise CatError("当前机型配置未提供 SPM TR 回包长度")
-            return self._sp(b"MTR", n, allow_terminator=True)
+            return self._sp(b"MTR", n)
         if w == "T2" or w == "2":
             if not get_rig_value(self.profile, "capabilities", "spm_t2", False):
                 raise CatError("当前机型配置未声明支持 SPMT2")
             n = int(get_rig_value(self.profile, "responses", "spm_t2_length", 0))
             if n <= 0: raise CatError("当前机型配置未提供 SPM T2 回包长度")
-            return self._sp(b"MT2", n, allow_terminator=True)
+            return self._sp(b"MT2", n)
         raise ValueError("SPM 参数为 TR 或 T2")
 
     def spn_read(self) -> bytes:
         n = int(get_rig_value(self.profile, "responses", "spn_length", 0))
         if n <= 0:
             raise CatError("当前机型配置未提供 SPN 回包长度")
-        return self._sp(b"N\xff\xff", n, allow_terminator=True)
+        return self._sp(b"N\xff\xff", n)
 
     def spn_write(self, value: int) -> bytes:
         if not get_rig_value(self.profile, "capabilities", "service_mode", False) or not get_rig_value(self.profile, "capabilities", "service_menu", False):
@@ -911,8 +957,7 @@ class HiddenCat:
         if not isinstance(table_len, int) or table_len <= 0:
             raise CatError("当前机型配置未提供 SPARD 设置表长度")
         response_len = 5 + table_len + 2
-        return self._sp(b"ARD", response_len, timeout=self._t_for(response_len, 1.2),
-                        allow_terminator=True)
+        return self._sp(b"ARD", response_len, timeout=self._t_for(response_len, 1.2))
 
     def spa_cl(self) -> bytes:
         if not get_rig_value(self.profile, "capabilities", "spa_cl", False):
@@ -928,8 +973,7 @@ class HiddenCat:
         """SPSDR：读取 SDR 相关的 9 字节数据帧。"""
         if not get_rig_value(self.profile, "capabilities", "spsdr", False):
             raise CatError("当前机型配置未声明支持 SPSDR")
-        return self._sp(bytes([0x53, 0x44, 0x52, b0 & 0xFF, b1 & 0xFF]), 9,
-                        allow_terminator=True)
+        return self._sp(bytes([0x53, 0x44, 0x52, b0 & 0xFF, b1 & 0xFF]), 9)
 
     # ---- 配置字节 / FRAM 批量 ----
     def read_config_pair(self) -> tuple[int, int, bytes]:
@@ -943,25 +987,13 @@ class HiddenCat:
         return r[5], r[6], r
 
     def write_config_pair(self, b0: int, b1: int) -> bytes:
-        """Write the configured byte pair; use a safe adjacent-byte fallback if framing collides."""
+        """写入配置字节对。"""
         if not (0 <= b0 <= 0xFF and 0 <= b1 <= 0xFF):
             raise ValueError("配置字节必须在 0x00–0xFF")
         addr = get_rig_value(self.profile, "fram", "config_pair_addr")
         if addr is None:
             raise CatError("当前机型配置未提供配置对地址")
-        addr = int(addr)
-        try:
-            return self.spw(addr, b0, b1)
-        except CatError as exc:
-            if "0x3B" not in str(exc):
-                raise
-            # The fallback can only safely update the second byte. Never silently
-            # skip a requested change to the first byte.
-            current = self.spr(addr)
-            if current[5] != b0:
-                raise CatError("SP 帧包含结束符且配置对首字节也需修改；已拒绝不完整写入") from exc
-            adjacent = self.spr(addr + 1)
-            return self.spw(addr + 1, b1, adjacent[6])
+        return self.spw(int(addr), b0, b1)
 
     def write_fram(self, start: int, data: bytes, progress=None,
                    cancel=None, verify=False) -> int:

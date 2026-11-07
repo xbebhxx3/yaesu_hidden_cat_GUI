@@ -47,6 +47,7 @@ def launch_gui():
 
             self._build_menu()
             self._build()
+            self.protocol("WM_DELETE_WINDOW", self._on_close)
             self.after(80, self._poll)
             if serial is None:
                 self.log("⚠ 未检测到 pyserial，请先 `pip install pyserial`")
@@ -127,6 +128,18 @@ def launch_gui():
 
         def _ts_ui_value(self, ts):
             return f"{ts} — {self._ts_label(ts)}"
+
+        def _exp_bits(self):
+            """Return (mask, value) for the EXP field.
+
+            Profiles with a multi-bit mode field (e.g. FT-891 bit6:bit5) set
+            ``exp_mask``/``exp_value``; single-bit models fall back to
+            ``exp_bit`` so existing profiles keep their behaviour.
+            """
+            exp_bit = int(self._cfg("power", "exp_bit", 0) or 0)
+            exp_mask = int(self._cfg("power", "exp_mask", exp_bit) or 0)
+            exp_value = int(self._cfg("power", "exp_value", exp_bit) or 0)
+            return exp_mask, exp_value
 
         def _profile_memory(self, key, default=None):
             return get_rig_value(self._profile_cfg(), "fram", key, default)
@@ -216,9 +229,16 @@ def launch_gui():
             hm.add_command(label="使用说明", command=self._help)
             hm.add_command(label="协议/安全提示", command=self._help_safety)
             hm.add_separator()
-            hm.add_command(label="退出", command=self.destroy)
+            hm.add_command(label="退出", command=self._on_close)
             m.add_cascade(label="帮助", menu=hm)
             self.config(menu=m)
+
+        def _on_close(self):
+            """Restore AI state and close the serial port before exiting."""
+            try:
+                self.link.close()
+            finally:
+                self.destroy()
 
         def _help(self):
             messagebox.showinfo(APP_TITLE, __doc__[:1500])
@@ -229,7 +249,6 @@ def launch_gui():
                 "· SP / PE / JP 会写校准或启动参数，可能改变发射指标或导致无法开机。\n"
                 "· ZZ 会立即复位整机。\n"
                 "· 写操作前请先备份当前机型相关 FRAM 区域，并确认可恢复。\n"
-                "· SP 是二进制子协议：参数/校验为原始字节，且不能含 0x3B(';')。\n"
                 "· 服务模式/复位命令行为依机型而异；仅使用当前配置明确标记已验证的命令。\n"
                 "  不要把复位或初始化命令当作普通退出命令。\n"
                 "· 本工具为静态逆向结论，未在真机验证；风险自负。")
@@ -290,7 +309,7 @@ def launch_gui():
                             ("E0 读取", "E0 读取"),
                             ("E8 读取", "E8 读取"),
                             ("SPARD 读取", "SPARD 读取"),
-                            ("JP 写入", "JP 写入（未开放）")):
+                            ("JP 写入", "JP 写入")):
                         if str(txt).startswith(prefix):
                             tip = BUTTON_TIPS.get(key)
                             break
@@ -369,11 +388,11 @@ def launch_gui():
 
         def toggle_open(self):
             if self.link.is_open:
-                self.link.close()
+                restored_ai = self.link.close()
                 self.btn_open.configure(text="打开")
                 self.status("已关闭")
                 self._refresh_model_banner()
-                self.log("串口已关闭")
+                self.log("串口已关闭" + ("；已发送 AI1; 恢复 AI 自动信息" if restored_ai else ""))
             else:
                 port = self.cmb_port.get().strip()
                 if not port:
@@ -414,17 +433,21 @@ def launch_gui():
                     messagebox.showerror(APP_TITLE, f"打开失败: {e}")
 
         def _probe_connected_rig(self, cat):
-            """Read standard CAT ID and the selected model's VE version after connection."""
+            """Check AI auto-information, then read CAT ID and VE version."""
+            try:
+                cat.prepare_serial_session()
+            except Exception as exc:
+                self.log(f"AI 状态检查未成功（不影响连接）: {exc}")
             try:
                 rid = cat.id_read()
-                id_text = rid.decode('latin-1', 'replace').strip() or hexs(rid)
+                id_text = rid.decode('latin-1', 'replace').strip() or hexs_ascii(rid)
                 self.log(f"设备 ID: {id_text}")
                 self.ui(lambda value=id_text: self._set_detected_identity(device_id=value))
             except Exception as exc:
                 self.log(f"ID 查询未成功（不代表连接失败）: {exc}")
             try:
                 r = cat.ve()
-                version_text = r.decode('latin-1', 'replace').strip() or hexs(r)
+                version_text = r.decode('latin-1', 'replace').strip() or hexs_ascii(r)
                 self.log(f"固件/VE 信息: {version_text}")
                 self.ui(lambda value=version_text: self._set_detected_identity(version=value))
             except Exception as exc:
@@ -499,13 +522,14 @@ def launch_gui():
             # --- JP / 诊断转储 ---
             row = group("JP / 诊断转储 (E0 / E8)")
             btn(row, "JP 读 (当前前缀)", self.do_jp_read, 22)
+            lbl(row, "JP 参数 (8 hex):")
+            self.ent_jp = entry(row, 12)
+            self.btn_jp_write = btn(row, "JP 写入", self.do_jp_write, 12)
             e0_len = self._cfg("dumps", "e0_length")
             e8_len = self._cfg("dumps", "e8_length")
             self.btn_e0 = btn(row, f"E0 读取 ({e0_len or '未配置'})", self.do_e0, 18)
             self.btn_e8 = btn(row, f"E8 读取 ({e8_len or '未配置'})", self.do_e8, 18)
-            self.btn_jp_write = btn(row, "JP 写入（未开放）", self.do_jp_write, 22)
-            self.btn_jp_write.configure(state="disabled")
-            self.lbl_jp_write = ttk.Label(row, text="JP 写入未开放；原因见机型提示。", foreground="#555")
+            self.lbl_jp_write = ttk.Label(row, text="", foreground="#555")
             self.lbl_jp_write.pack(side="left", padx=8)
 
             # --- SP 维护帧（只读类） ---
@@ -558,9 +582,9 @@ def launch_gui():
             if not self.require_open(): return
             def job(cat):
                 r = cat.ve()
-                self.log(f"VE: {hexs(r)}")
+                self.log(f"VE: {hexs_ascii(r)}")
                 self.log(f"VE 文本: {r.decode('latin-1')}")
-                self._q_show_quick("VE", f"{hexs(r)}\n{r.decode('latin-1')}")
+                self._q_show_quick("VE", f"{hexs_ascii(r)}\n{r.decode('latin-1')}")
             self.bg(job)
 
         def do_fd_read(self):
@@ -568,7 +592,7 @@ def launch_gui():
             x = int(self.cmb_fd.get())
             def job(cat):
                 r = cat.fd_read(x)
-                self._q_show_quick(f"FD 读 通道{x}", hexs(r))
+                self._q_show_quick(f"FD 读 通道{x}", hexs_ascii(r))
             self.bg(job)
 
         def do_fd_write(self):
@@ -576,14 +600,14 @@ def launch_gui():
             h = self.ent_fd.get()
             def job(cat):
                 r = cat.fd_write(h)
-                self._q_show_quick("FD 写", f"({h}) 回包: {hexs(r) if r else '无'}")
+                self._q_show_quick("FD 写", f"({h}) 回包: {hexs_ascii(r) if r else '无'}")
             self.bg(job)
 
         def do_kt_read(self):
             if not self.require_open(): return
             def job(cat):
                 r = cat.kt_read()
-                self._q_show_quick("KT 读余量", hexs(r))
+                self._q_show_quick("KT 读余量", hexs_ascii(r))
             self.bg(job)
 
         def do_kt_write(self):
@@ -591,21 +615,21 @@ def launch_gui():
             t = self.ent_kt.get()
             def job(cat):
                 r = cat.kt_write(t)
-                self._q_show_quick("KT 写", f"({t!r}) 回包: {hexs(r) if r else '无'}")
+                self._q_show_quick("KT 写", f"({t!r}) 回包: {hexs_ascii(r) if r else '无'}")
             self.bg(job)
 
         def do_kt_clear(self):
             if not self.require_open(): return
             def job(cat):
                 r = cat.kt_clear()
-                self._q_show_quick("KT 清空", f"回包: {hexs(r) if r else '无'}")
+                self._q_show_quick("KT 清空", f"回包: {hexs_ascii(r) if r else '无'}")
             self.bg(job)
 
         def do_ek(self):
             if not self.require_open(): return
             def job(cat):
                 r = cat.ek()
-                self._q_show_quick("EK", f"回包: {hexs(r) if r else '无'}")
+                self._q_show_quick("EK", f"回包: {hexs_ascii(r) if r else '无'}")
             self.bg(job)
 
         def do_eo(self):
@@ -617,7 +641,7 @@ def launch_gui():
                 return
             def job(cat):
                 r = cat.eo(int(s[0]), s[1], int(s[2]), int(s[3:]))
-                self._q_show_quick("EO", f"({s}) 回包: {hexs(r) if r else '无'}")
+                self._q_show_quick("EO", f"({s}) 回包: {hexs_ascii(r) if r else '无'}")
             self.bg(job)
 
         def do_jp_read(self):
@@ -626,26 +650,60 @@ def launch_gui():
             def job(cat):
                 r = cat.jp_read()
                 info = cat.parse_jp(r)
-                self._q_show_quick("JP 读", hexs(r))
-                self.log(f"JP 读: {hexs(r)}")
+                self._q_show_quick("JP 读", hexs_ascii(r))
+                self.log(f"JP 读: {hexs_ascii(r)}")
                 if hasattr(self, "txt_prof_result"):
-                    msg = (f"JP 读 ({cat.jp_prefix}) -> {hexs(r)}\n"
+                    msg = (f"JP 读 ({cat.jp_prefix}) -> {hexs_ascii(r)}\n"
                            f"  v={info.get('v_hex', '?')} w={info.get('w_hex', '?')} "
                            f"互补={info.get('complement', '?')} extra={info.get('extra_hex', '?')}\n")
                     self._q_append_text(self.txt_prof_result, msg)
             self.bg(job)
 
         def do_jp_write(self):
-            """JP 写入没有经过资料确认的安全值，保持禁用。"""
-            note = self._profile_cfg().get(
-                "jp_write_note", "JP 写入未开放；原因见机型配置。")
-            messagebox.showwarning(APP_TITLE, f"JP 写入已禁用。\n{note}")
+            """JP 写入：v/w 互补校验 + 设备身份 + 备份确认，写后回读核对。"""
+            if not self.require_open(): return
+            if not self._cap("jp_write"):
+                messagebox.showwarning(APP_TITLE, "当前机型配置未启用 JP 写入")
+                return
+            try:
+                h = self.ent_jp.get().strip().upper()
+                if len(h) != 8 or any(c not in "0123456789ABCDEF" for c in h):
+                    raise ValueError("JP 参数必须是 8 个十六进制字符（v + ~v）")
+                v, w = int(h[:4], 16), int(h[4:], 16)
+                if (v ^ w) != 0xFFFF:
+                    raise ValueError(f"两个字必须互补：0x{v:04X} ^ 0x{w:04X} != 0xFFFF")
+            except Exception as e:
+                messagebox.showwarning(APP_TITLE, str(e)); return
+            if not self._require_backup_ack():
+                return
+            note = str(self._profile_cfg().get("jp_write_note", "")).strip()
+            if not messagebox.askyesno(
+                    APP_TITLE,
+                    f"确认写入 JP 参数 {h}？低 5 位 0x{v & 0x1F:02X} 会写入 TS/功率等级位。\n"
+                    f"{note}\n"
+                    "写入会改配置对并有副作用，必须先备份；写后自动回读。"):
+                return
+            def job(cat):
+                r = cat.jp_write(h)
+                self.log(f"JP 写入 {h}: 回包 {hexs_ascii(r) if r else '无'}")
+                back = cat.jp_read()
+                info = cat.parse_jp(back)
+                self._q_show_quick("JP 写入",
+                                   f"写 {h}  回包: {hexs_ascii(r) if r else '无'}\n"
+                                   f"回读 {hexs_ascii(back)}\n"
+                                   f"  v={info.get('v_hex', '?')} w={info.get('w_hex', '?')} "
+                                   f"互补={info.get('complement', '?')}")
+                self._q_append_text(
+                    self.txt_prof_result,
+                    f"JP 写入 {h} -> 回读 v={info.get('v_hex', '?')} w={info.get('w_hex', '?')} "
+                    f"互补={info.get('complement', '?')}\n")
+            self.bg(job)
 
         def do_e0(self):
             if not self.require_open(): return
             def job(cat):
                 r = cat.e0()
-                self._q_show_quick("E0", f"{len(r)} 字节:\n{hexs(r)}")
+                self._q_show_quick("E0", f"{len(r)} 字节:\n{hexs_ascii(r)}")
             self.bg(job)
 
         def do_e8(self):
@@ -653,28 +711,28 @@ def launch_gui():
             def job(cat):
                 self.status("正在读取 E8 转储…")
                 r = cat.e8()
-                self._q_show_quick("E8", f"{len(r)} 字节(前 256):\n{hexs(r[:256])}")
+                self._q_show_quick("E8", f"{len(r)} 字节(前 256):\n{hexs_ascii(r[:256])}")
             self.bg(job)
 
         def do_spard(self):
             if not self.require_open(): return
             def job(cat):
                 r = cat.spa_rd()
-                self._q_show_quick("SPARD", f"{len(r)} 字节(前 256):\n{hexs(r[:256])}")
+                self._q_show_quick("SPARD", f"{len(r)} 字节(前 256):\n{hexs_ascii(r[:256])}")
             self.bg(job)
 
         def do_spm(self, which):
             if not self.require_open(): return
             def job(cat):
                 r = cat.spm(which)
-                self._q_show_quick(f"SPM {which}", hexs(r))
+                self._q_show_quick(f"SPM {which}", hexs_ascii(r))
             self.bg(job)
 
         def do_spn_read(self):
             if not self.require_open(): return
             def job(cat):
                 r = cat.spn_read()
-                self._q_show_quick("SPN 读", hexs(r))
+                self._q_show_quick("SPN 读", hexs_ascii(r))
             self.bg(job)
 
         def do_spn_write(self):
@@ -696,7 +754,7 @@ def launch_gui():
                 return
             def job(cat):
                 r = cat.spn_write(n)
-                self._q_show_quick("SPN 写", f"N={n:03d} 回包: {hexs(r) if r else '无'}")
+                self._q_show_quick("SPN 写", f"N={n:03d} 回包: {hexs_ascii(r) if r else '无'}")
             self.bg(job)
 
         def do_spsdr(self):
@@ -711,13 +769,13 @@ def launch_gui():
                 messagebox.showwarning(APP_TITLE, "SPSDR 的 b0/b1 必须是 0x00–0xFF"); return
             def job(cat):
                 r = cat.spsdr(b0, b1)
-                self._q_show_quick("SPSDR", f"b0={b0:02X} b1={b1:02X}\n{hexs(r)}")
+                self._q_show_quick("SPSDR", f"b0={b0:02X} b1={b1:02X}\n{hexs_ascii(r)}")
             self.bg(job)
 
         def do_spa_we(self):
             if not self.require_open(): return
             def job(cat):
-                self._q_show_quick("SPAWE", hexs(cat.spa_we()))
+                self._q_show_quick("SPAWE", hexs_ascii(cat.spa_we()))
             self.bg(job)
 
         def do_spa_cl(self):
@@ -729,7 +787,7 @@ def launch_gui():
                     "请确认已备份当前机型相关 FRAM 区域。继续？"):
                 return
             def job(cat):
-                self._q_show_quick("SPACL", hexs(cat.spa_cl()))
+                self._q_show_quick("SPACL", hexs_ascii(cat.spa_cl()))
             self.bg(job)
 
         def do_spa_et(self):
@@ -740,7 +798,7 @@ def launch_gui():
                     "发送 SPAET 会触发设置表应用逻辑，可能改变校准行为。继续？"):
                 return
             def job(cat):
-                self._q_show_quick("SPAET", hexs(cat.spa_et()))
+                self._q_show_quick("SPAET", hexs_ascii(cat.spa_et()))
             self.bg(job)
 
         # ---------------- Tab: 功率 / 频段 ----------------
@@ -827,11 +885,11 @@ def launch_gui():
             levels = self._cfg("power", "levels", {})
             ts_mask = int(self._cfg("power", "ts_mask", 0))
             pwr_mask = int(self._cfg('power', 'power_mask', 0))
-            exp_bit = int(self._cfg("power", "exp_bit", 0))
-            aux_mask = int(self._cfg("power", "aux_mask", 0))
+            exp_mask, exp_value = self._exp_bits()
             ts = b1 & ts_mask
             bits = b1 & pwr_mask
-            exp = bool(exp_bit and b1 & exp_bit)
+            mode_bits = b1 & exp_mask if exp_mask else 0
+            exp = bool(exp_mask and mode_bits == exp_value)
             addr = int(self._cfg("power", "config_pair_addr",
                                  self._cfg("fram", "config_pair_addr", 0)) or 0)
             self.cfg_pair = (b0, b1)
@@ -842,13 +900,22 @@ def launch_gui():
                 self.var_cfg_ts.set(f"TS：{self._ts_label(ts)}")
             level_name = next((str(label) for label, value in levels.items() if int(value) == bits), "未识别功率等级")
             self.var_cfg_pwr.set(f"功率等级：{level_name}")
-            self.var_cfg_exp.set(f"扩展频段：{'开启' if exp else '关闭'}")
+            if exp_mask:
+                mode_labels = self._cfg("power", "mode_labels", {}) or {}
+                mode_text = mode_labels.get(str(mode_bits), "开启" if exp else "关闭")
+                if mode_labels:
+                    self.var_cfg_exp.set(f"频段表模式：{mode_text}")
+                else:
+                    self.var_cfg_exp.set(f"扩展频段：{mode_text}")
+            else:
+                self.var_cfg_exp.set("扩展频段：未配置")
             if self.cmb_ts.cget("state") != "disabled":
                 self.cmb_ts.set(self._ts_ui_value(ts))
             self.var_exp.set(exp)
             if level_name in levels:
                 self.cmb_pwr.set(level_name)
-            ranges, why = effective_ranges(ts, exp, self._profile_cfg())
+            ranges, why = effective_ranges(ts, exp, self._profile_cfg(),
+                                           mode_bits if exp_mask else None)
             range_text = fmt_ranges(ranges) if ranges else "该机型尚未配置可显示的频率范围"
             note = self._cfg("power", "range_note", "")
             self.var_range.set(f"当前频率范围参考：{range_text} MHz。{note}".strip())
@@ -867,12 +934,11 @@ def launch_gui():
 
         def _read_power_limits(self, cat):
             """Best-effort read of the configured power-limit (AC) items."""
-            items = cat.ac_write_cfg().get("items", []) or []
             parts = []
-            for item in items:
+            for item in cat.ac_write_cfg().get("items", []) or []:
                 label = str(item.get("label", ""))
                 try:
-                    parts.append(f"{label}={cat.ex_read(item.get('addr'))}")
+                    parts.append(f"{label}={cat.read_fram_byte(int(str(item['addr']), 16))}")
                 except Exception as e:  # noqa: BLE001 - report per item
                     parts.append(f"{label}=读取失败({e})")
             if parts:
@@ -890,8 +956,6 @@ def launch_gui():
             if not self._need_cfg(): return
             try:
                 bits = pwr_bits_from_text(self.cmb_pwr.get(), self._profile_cfg())
-                b0, old = self.cfg_pair
-                new = (old & ~int(self._cfg('power', 'power_mask', 0))) | bits
                 label = self._power_label(bits)
                 self.txt_power.insert("end", f"功率等级预览：将设置为 {label}；其他设备设置保持不变。\n")
                 self.txt_power.see("end")
@@ -912,13 +976,13 @@ def launch_gui():
             except Exception as e:
                 messagebox.showwarning(APP_TITLE, str(e)); return
             ac_on = self._cap("power_ac_write") and bool(self.cat.ac_write_cfg().get("items"))
-            if not self._require_backup_ack():
+            if not self._require_device_identity():
                 return
             extra = "\n随后按当前机型配置写入功率上限（AC）。" if ac_on else ""
             if not messagebox.askyesno(
                     APP_TITLE,
                     f"确认将功率等级设置为“{label}”？\n"
-                    f"只修改功率等级位，其他设置保持不变。{extra}写入后会自动回读确认；建议先备份。"):
+                    f"只修改功率等级位，其他设置保持不变。{extra}写入后会自动回读确认。"):
                 return
             def job(cat):
                 cat.write_config_pair(b0, new)
@@ -944,7 +1008,7 @@ def launch_gui():
             for item in results:
                 back, target = item.get("readback"), int(item["target"])
                 if item.get("error"):
-                    status = f"（写入被拒：{item['error']}）"
+                    status = f"（写入失败：{item['error']}）"
                     mismatched += 1
                 elif back is None:
                     status = "（未回读）"
@@ -956,12 +1020,10 @@ def launch_gui():
                     status = f"= {back}"
                 lines.append(f"  {item['label']}：{target} {status}")
             if mismatched:
-                lines.append("  部分项与目标不一致。EX 上限按设备当前档位夹取："
-                             "若刚改了档位，请整机断电重启后再写入。")
-            else:
-                note = str(cfg.get("reboot_note", "")).strip()
-                if note:
-                    lines.append(f"  {note}")
+                lines.append(f"  {mismatched} 项与目标不一致，请重试或检查串口。")
+            note = str(cfg.get("reboot_note", "")).strip()
+            if note:
+                lines.append(f"  {note}")
             self.log(f"功率上限（AC）已写入：{class_label}（{len(results)} 项，"
                      f"{len(results) - mismatched} 项一致）")
             self._q_append_text(self.txt_power, "\n".join(lines) + "\n")
@@ -975,11 +1037,9 @@ def launch_gui():
             try:
                 ts = self._ts_index_from_ui()
                 exp = bool(self.var_exp.get())
-                b0, old = self.cfg_pair
-                ts_mask = int(self._cfg("power", "ts_mask", 0))
-                exp_bit = int(self._cfg("power", "exp_bit", 0))
-                new = (old & ~(ts_mask | exp_bit)) | (ts & ts_mask) | (exp_bit if exp else 0)
-                ranges, why = effective_ranges(ts, exp, self._profile_cfg())
+                exp_mask, exp_value = self._exp_bits()
+                ranges, why = effective_ranges(ts, exp, self._profile_cfg(),
+                                               exp_value if (exp and exp_mask) else (0 if exp_mask else None))
                 label = self._ts_label(ts)
                 range_text = fmt_ranges(ranges) if ranges else "未提供频率范围资料"
                 self.txt_power.insert("end", f"频率范围预览：{label}；{range_text} MHz；扩展频段{'开启' if exp else '关闭'}。\n")
@@ -998,12 +1058,13 @@ def launch_gui():
                 exp = bool(self.var_exp.get())
                 b0, old = self.cfg_pair
                 ts_mask = int(self._cfg("power", "ts_mask", 0))
-                exp_bit = int(self._cfg("power", "exp_bit", 0))
-                new = (old & ~(ts_mask | exp_bit)) | (ts & ts_mask) | (exp_bit if exp else 0)
-                ranges, why = effective_ranges(ts, exp, self._profile_cfg())
+                exp_mask, exp_value = self._exp_bits()
+                new = (old & ~(ts_mask | exp_mask)) | (ts & ts_mask) | (exp_value if exp else 0)
+                ranges, why = effective_ranges(ts, exp, self._profile_cfg(),
+                                               exp_value if (exp and exp_mask) else (0 if exp_mask else None))
             except Exception as e:
                 messagebox.showwarning(APP_TITLE, str(e)); return
-            if not self._require_backup_ack():
+            if not self._require_device_identity():
                 return
             if not messagebox.askyesno(
                     APP_TITLE,
@@ -1080,7 +1141,7 @@ def launch_gui():
             ttk.Label(row, text="JP / ZZ 共用机型代码 (4 位十六进制):").grid(row=1, column=2, sticky="e", padx=(12, 0))
             self.ent_prof_service_code = ttk.Entry(row, width=12)
             self.ent_prof_service_code.grid(row=1, column=3, sticky="w", padx=4)
-            ttk.Label(row, text="JP 与 ZZ 使用同一机型代码；程序自动生成 JP{代码} 和 ZZPE{代码}。JP 写入数据值不是机型代码；存在未验证副作用或未确认安全值时，写入保持禁用。",
+            ttk.Label(row, text="JP 与 ZZ 使用同一机型代码；程序自动生成 JP{代码} 和 ZZPE{代码}。JP 写入数据值不是机型代码；写入会改配置对与 TS/功率位，须先备份。",
                       foreground="#a00", wraplength=850).grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 2))
 
             note = ttk.Label(f, foreground="#555", justify="left", text=(
@@ -1094,9 +1155,8 @@ def launch_gui():
             ttk.Button(btns, text="读取 ID", command=self.do_id_read).pack(side="left", padx=4)
             ttk.Button(btns, text="读取 VE 版本", command=self.do_ve).pack(side="left", padx=4)
             ttk.Button(btns, text="JP 读取", command=self.do_jp_read).pack(side="left", padx=4)
-            self.btn_prof_jp_write = ttk.Button(btns, text="JP 写入（未开放）", command=self.do_jp_write)
+            self.btn_prof_jp_write = ttk.Button(btns, text="JP 写入", command=self.do_jp_write)
             self.btn_prof_jp_write.pack(side="left", padx=4)
-            self.btn_prof_jp_write.configure(state="disabled")
             self.lbl_magic_state = ttk.Label(
                 btns,
                 text=f"当前: VE={self.cat.ve_magic} / JP={self.cat.jp_prefix} / ZZ={self.cat.zz_prefix}",
@@ -1185,7 +1245,8 @@ def launch_gui():
                 ("btn_kt_clear", "kt_write"), ("btn_eo", "eo"),
                 ("btn_ek", "ek"), ("btn_spsdr", "spsdr"),
                 ("btn_zz", "service_mode"), ("btn_spn_write", "service_menu"),
-                ("btn_jp_write", "jp_write"), ("btn_spard", "spa_rd"),
+                ("btn_jp_write", "jp_write"), ("btn_prof_jp_write", "jp_write"),
+                ("btn_spard", "spa_rd"),
                 ("btn_spawe", "spa_we"), ("btn_spacl", "spa_cl"),
                 ("btn_spaet", "spa_et"), ("btn_spn_read", "service_mode"),
                 ("btn_fram_dump_write", "fram_raw_write"),
@@ -1199,6 +1260,7 @@ def launch_gui():
                 ("ent_fd", "fd_write"), ("ent_kt", "kt_write"),
                 ("ent_eo", "eo"), ("ent_spn_write", "service_menu"),
                 ("ent_spsdr0", "spsdr"), ("ent_spsdr1", "spsdr"),
+                ("ent_jp", "jp_write"),
             ]
             for attr, cap_name in entry_caps:
                 if hasattr(self, attr):
@@ -1343,17 +1405,17 @@ def launch_gui():
                                 row.get("purpose") or labels.get(row["name"], row["name"]),
                                 row.get("confidence", "")))
             if hasattr(self, "lbl_jp_write"):
+                jp_cap = bool(get_rig_value(profile, "capabilities", "jp_write", False))
                 jp_status = profile.get("jp_write_status", "")
-                jp_note = profile.get("jp_write_note", "") or "JP 写入未开放。"
-                self.lbl_jp_write.configure(text=jp_note)
-                self.btn_jp_write.configure(
-                    text=("JP 写入（不支持）" if jp_status == "unsupported"
-                          else "JP 写入（未验证，禁用）"))
+                text = ("JP 写入" if jp_cap else
+                        "JP 写入（不支持）" if jp_status == "unsupported"
+                        else "JP 写入（未验证，禁用）")
+                self.lbl_jp_write.configure(
+                    text=(profile.get("jp_write_note", "") if jp_cap
+                          else "JP 写入未开放；原因见机型提示。"))
+                self.btn_jp_write.configure(text=text)
                 if hasattr(self, "btn_prof_jp_write"):
-                    self.btn_prof_jp_write.configure(
-                        text=("JP 写入（不支持）" if jp_status == "unsupported"
-                              else "JP 写入（未验证，禁用）"),
-                        state="disabled")
+                    self.btn_prof_jp_write.configure(text=text)
             if hasattr(self, "sm_tree"):
                 for iid in self.sm_tree.get_children():
                     self.sm_tree.delete(iid)
@@ -1590,12 +1652,12 @@ def launch_gui():
             def job(cat):
                 r = cat.id_read()
                 txt = r.decode("latin-1", "replace")
-                self.log(f"ID: {hexs(r)} / {txt}")
+                self.log(f"ID: {hexs_ascii(r)} / {txt}")
                 warn = ""
                 if want and want not in txt.upper():
                     warn = f"  ⚠ 与预设 CAT ID {want} 不一致，请确认机型/魔术串"
                     self.log(warn)
-                self._q_append_text(self.txt_prof_result, f"ID -> {hexs(r)}  {txt}{warn}\n")
+                self._q_append_text(self.txt_prof_result, f"ID -> {hexs_ascii(r)}  {txt}{warn}\n")
             self.bg(job)
 
         # ---------------- Tab: 外部 FRAM / 设置表 ----------------
@@ -1660,7 +1722,7 @@ def launch_gui():
                 messagebox.showwarning(APP_TITLE, str(e)); return
             def job(cat):
                 r = cat.spr(addr)
-                self._q_append_text(self.txt_reg, f"SPR {addr:04X} -> {r[5]:02X} {r[6]:02X}   ({hexs(r)})\n")
+                self._q_append_text(self.txt_reg, f"SPR {addr:04X} -> {r[5]:02X} {r[6]:02X}   ({hexs_ascii(r)})\n")
             self.bg(job)
 
         def do_reg_write(self):
@@ -1668,7 +1730,8 @@ def launch_gui():
             try:
                 addr = self._pv(self.ent_addr.get(), "地址")
                 d = bytes.fromhex(self.ent_data.get().replace(" ", ""))
-                assert len(d) == 2
+                if len(d) != 2:
+                    raise ValueError("数据必须是 2 字节（4 个十六进制字符）")
             except Exception as e:
                 messagebox.showwarning(APP_TITLE, f"参数错误: {e}"); return
             if not self._require_backup_ack():
@@ -1677,7 +1740,7 @@ def launch_gui():
                 return
             def job(cat):
                 r = cat.spw(addr, d[0], d[1])
-                self._q_append_text(self.txt_reg, f"SPW {addr:04X} <- {d.hex()}  回包 {hexs(r)}\n")
+                self._q_append_text(self.txt_reg, f"SPW {addr:04X} <- {d.hex()}  回包 {hexs_ascii(r)}\n")
             self.bg(job)
 
         def do_tab_read(self):
@@ -1687,7 +1750,7 @@ def launch_gui():
                 messagebox.showwarning(APP_TITLE, str(e)); return
             def job(cat):
                 r = cat.spr_table(addr)
-                self._q_append_text(self.txt_reg, f"SPr {addr:04X} -> {r[6]:02X}   ({hexs(r)})\n")
+                self._q_append_text(self.txt_reg, f"SPr {addr:04X} -> {r[6]:02X}   ({hexs_ascii(r)})\n")
             self.bg(job)
 
         def do_tab_write(self):
@@ -1695,7 +1758,8 @@ def launch_gui():
             try:
                 addr = self._pv(self.ent_taddr.get(), "表地址")
                 d = int(self.ent_tdata.get().strip(), 16)
-                assert 0 <= d <= 0xFF
+                if not 0 <= d <= 0xFF:
+                    raise ValueError("数值必须是 0x00–0xFF")
             except Exception as e:
                 messagebox.showwarning(APP_TITLE, f"参数错误: {e}"); return
             if not self._require_backup_ack():
@@ -1705,14 +1769,14 @@ def launch_gui():
                 return
             def job(cat):
                 r = cat.spw_table(addr, d)
-                self._q_append_text(self.txt_reg, f"SPw {addr:04X} <- {d:02X}  回包 {hexs(r)}\n")
+                self._q_append_text(self.txt_reg, f"SPw {addr:04X} <- {d:02X}  回包 {hexs_ascii(r)}\n")
             self.bg(job)
 
         def do_2001(self):
             if not self.require_open(): return
             def job(cat):
                 r = cat.spr_table(0xFFFF)
-                self._q_append_text(self.txt_reg, f"SPr FFFF -> {r[6]:02X}   ({hexs(r)})\n")
+                self._q_append_text(self.txt_reg, f"SPr FFFF -> {r[6]:02X}   ({hexs_ascii(r)})\n")
             self.bg(job)
 
         def do_range_export(self):
@@ -1729,7 +1793,6 @@ def launch_gui():
             if not path:
                 return
             def job(cat):
-                total = (e - s + 1 + 1) // 2
                 def prog(a, b):
                     self.status(f"导出 {a}/{b}  …")
                 data = cat.read_fram(s, e, progress=prog, cancel=self.cancel, strict=True)
@@ -1895,8 +1958,12 @@ def launch_gui():
                     self.ent_fram_e.delete(0, "end"); self.ent_fram_e.insert(0, f"{inclusive_end:04X}")
                     return
 
-        def _require_backup_ack(self) -> bool:
-            """Require a verified device identity and an explicit backup acknowledgement."""
+        def _require_device_identity(self) -> bool:
+            """Require a verified device identity (CAT ID) before writing.
+
+            Power / band writes only need the identity check; their callers do not
+            ask for a backup acknowledgement.
+            """
             profile = self._profile_cfg()
             expected = str(profile.get("cat_id", "")).strip().upper()
             detected = str(getattr(self, "detected_device_id", "")).strip().upper()
@@ -1912,6 +1979,12 @@ def launch_gui():
                     APP_TITLE,
                     f"当前机型配置没有已确认的 CAT ID。实测 ID 为 {detected}。\n"
                     "请自行核对电台型号/固件后，是否继续该写入？"):
+                return False
+            return True
+
+        def _require_backup_ack(self) -> bool:
+            """Require a verified device identity and an explicit backup acknowledgement."""
+            if not self._require_device_identity():
                 return False
             if not self.var_backup_ack.get():
                 messagebox.showwarning(
@@ -1935,10 +2008,13 @@ def launch_gui():
                 self.ui(lambda: self._render_fram(data, start))
                 return
             self.txt_fram.delete("1.0", "end")
+            # 全表 32 KiB 是 2048 行；先拼好整段文本再一次 insert，避免逐行更新控件。
+            lines = []
             for off in range(0, len(data), 16):
                 chunk = data[off:off + 16]
-                asc = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
-                self.txt_fram.insert("end", f"{start + off:04X}: {hexs(chunk):<47}  {asc}\n")
+                lines.append(f"{start + off:04X}: {hexs(chunk):<47}  {ascii_view(chunk)}")
+            if lines:
+                self.txt_fram.insert("end", "\n".join(lines) + "\n")
 
         def do_fram_read_range(self):
             """按起止地址用 SPR 读取并显示。"""
@@ -2258,7 +2334,7 @@ def launch_gui():
                 self.log(f"服务菜单 N={n:03d} 已写 0x{v:02X}")
                 if apply_after:
                     r = cat.spa_et()
-                    self.log(f"SPAET: {hexs(r) if r else '无回包'}")
+                    self.log(f"SPAET: {hexs_ascii(r) if r else '无回包'}")
             self.bg(job)
 
         def do_sm_read_ns(self):
@@ -2283,13 +2359,13 @@ def launch_gui():
             if not self.require_open(): return
             def job(cat):
                 r = cat.spn_read()
-                self.log(f"SPN 读: {hexs(r)}")
+                self.log(f"SPN 读: {hexs_ascii(r)}")
                 if (len(r) == 7 and r[:3] == b"SPN" and r[-1:] == b";"
                         and r[5] == (sum(r[:5]) & 0xFF)):
                     n = (r[3] << 8) | r[4]
                     self.ui(lambda: (self.ent_sm_n.delete(0, "end"), self.ent_sm_n.insert(0, str(n))))
                     self.log(f"当前服务菜单项目 N=0x{n:03X} ({n})")
-                self._q_append_text(self.txt_power, f"SPN 读: {hexs(r)}\n")
+                self._q_append_text(self.txt_power, f"SPN 读: {hexs_ascii(r)}\n")
             self.bg(job)
 
         def do_sm_spn(self):
@@ -2313,7 +2389,7 @@ def launch_gui():
                 return
             def job(cat):
                 r = cat.spn_write(n)
-                self.log(f"SPN {n:03d}: {hexs(r) if r else '无回包'}")
+                self.log(f"SPN {n:03d}: {hexs_ascii(r) if r else '无回包'}")
             self.bg(job)
 
         def do_sm_spaet(self):
@@ -2323,7 +2399,7 @@ def launch_gui():
                 return
             def job(cat):
                 r = cat.spa_et()
-                self.log(f"SPAET: {hexs(r) if r else '无回包'}")
+                self.log(f"SPAET: {hexs_ascii(r) if r else '无回包'}")
             self.bg(job)
 
         def do_sm_spawe(self):
@@ -2331,7 +2407,7 @@ def launch_gui():
             if not self.require_open(): return
             def job(cat):
                 r = cat.spa_we()
-                self.log(f"SPAWE: {hexs(r) if r else '无回包'}")
+                self.log(f"SPAWE: {hexs_ascii(r) if r else '无回包'}")
             self.bg(job)
 
         def _pe_addr_text(self):
@@ -2411,9 +2487,9 @@ def launch_gui():
                 for off in range(0, len(tb), 16):
                     chunk = tb[off:off + 16]
                     addr = int(self._cfg("settings_table", "start_addr", 0) or 0) + off
-                    self.txt_cal.insert("end", f"0x{addr:04X}: {hexs(chunk)}\n")
+                    self.txt_cal.insert("end", f"0x{addr:04X}: {hexs_ascii(chunk)}\n")
             else:
-                self.txt_cal.insert("end", hexs(tb, sep=""))
+                self.txt_cal.insert("end", hexs_ascii(tb, sep=""))
 
         def do_cal_write(self):
             if not self.require_open(): return
@@ -2489,7 +2565,7 @@ def launch_gui():
                                 lines.append(f"PE{s0}{s1}{m}: ?;\n")
                             else:
                                 ok += 1
-                                lines.append(f"PE{s0}{s1}{m}: {r.decode('latin-1')}   ({hexs(r)})\n")
+                                lines.append(f"PE{s0}{s1}{m}: {r.decode('latin-1')}   ({hexs_ascii(r)})\n")
                 lines.append(f"\n有效 {ok}/{total}\n")
                 def show():
                     self.txt_pe.delete("1.0", "end")
@@ -2521,7 +2597,7 @@ def launch_gui():
                 return
             def job(cat):
                 r = cat.pe_write_raw(p)
-                self._q_append_text(self.txt_pe, f"PE{p} -> {hexs(r) if r else '无回包'}\n")
+                self._q_append_text(self.txt_pe, f"PE{p} -> {hexs_ascii(r) if r else '无回包'}\n")
             self.bg(job)
 
         # ---------------- Tab: PE 校准 ----------------
@@ -2601,7 +2677,6 @@ def launch_gui():
             iid = f"pe{sel}"
             if not self.pe_tree.exists(iid):
                 return
-            desc = self._pe_desc(sel)
             vals = list(self.pe_tree.item(iid, "values"))
             vals[2] = text
             # PE 读回包格式：PE<3选><3字符值>; 例如 PE000+0A; / PE002010;
@@ -2636,7 +2711,7 @@ def launch_gui():
                             else:
                                 ok += 1
                                 self._pe_fill_row(sel, r.decode("latin-1", "replace")
-                                                  + "  " + hexs(r))
+                                                  + "  " + hexs_ascii(r))
                 self.log(f"PE 读取完成: 有效 {ok}/{total}")
             self.bg(job)
 
@@ -2652,7 +2727,7 @@ def launch_gui():
                 messagebox.showwarning(APP_TITLE, "选择子不符合当前机型配置"); return
             def job(cat):
                 r = cat.pe_read(int(sel[0]), int(sel[1]), int(sel[2]))
-                text = "?;" if r is None else r.decode("latin-1", "replace") + "  " + hexs(r)
+                text = "?;" if r is None else r.decode("latin-1", "replace") + "  " + hexs_ascii(r)
                 self._pe_fill_row(sel, text)
                 def show():
                     self.ent_pe_cur2.delete(0, "end"); self.ent_pe_cur2.insert(0, text)
@@ -2681,7 +2756,7 @@ def launch_gui():
                 return
             def job(cat):
                 r = cat.pe_write_raw(payload)
-                self.log(f"PE{payload}: {hexs(r) if r else '无回包'}")
+                self.log(f"PE{payload}: {hexs_ascii(r) if r else '无回包'}")
             self.bg(job)
 
         # ---------------- Tab: 备份 ----------------
@@ -2927,7 +3002,7 @@ def launch_gui():
             cmd = self.ent_ascii.get()
             def job(cat):
                 r = cat._ascii(cmd, expect=None, timeout=1.0)
-                self._q_append_text(self.txt_term, f"> {cmd};\n< {hexs(r)}\n")
+                self._q_append_text(self.txt_term, f"> {cmd};\n< {hexs_ascii(r)}\n")
             self.bg(job)
 
         def do_hex(self):
@@ -2941,7 +3016,7 @@ def launch_gui():
             def job(cat):
                 cat.link.write(data)
                 r = cat.link.drain(1.0)
-                self._q_append_text(self.txt_term, f"> {data.hex()}\n< {hexs(r)}\n")
+                self._q_append_text(self.txt_term, f"> {data.hex()}\n< {hexs_ascii(r)}\n")
             self.bg(job)
 
         def do_pureread(self):
@@ -2952,7 +3027,7 @@ def launch_gui():
                 n = 256
             def job(cat):
                 r = cat.link.read_exact(n, timeout=cat._t_for(n, 1.0)) if n > 0 else cat.link.drain(1.0)
-                self._q_append_text(self.txt_term, f"< ({len(r)}B) {hexs(r)}\n")
+                self._q_append_text(self.txt_term, f"< ({len(r)}B) {hexs_ascii(r)}\n")
             self.bg(job)
 
         def do_build_sp(self):

@@ -1,0 +1,163 @@
+{
+  "id": "ftdx10",
+  "name": "Yaesu FTDX10",
+  "cat_id": "0761",
+  "ve_magic": "RAH076H",
+  "ve_full": "VERAH076H",
+  "status": "实机验证",
+  "magic_status": "实机验证",
+  "magic_evidence": "JP=0010 读 25B 已实机成功；写 12 字符语义来自 V01-15 静态分析，未写入验证。ZZ=PE0010。",
+  "notes": " 实机已确认：VE/JP 读、FD 15B、PE 9B（A=0/2，A=1 返回 ?;）、E0 229B、E8 10573B；KT 返回 ?;，SPARD 在非服务模式下返回 ?;。功率以及ts修改可用。",
+  "capabilities": {
+    "service_menu": true,
+    "pe_calibration": true,
+    "full_backup": true,
+    "spa_we": true,
+    "spa_rd": true,
+    "spa_cl": true,
+    "spa_et": true,
+    "spsdr": true,
+    "spm_tr": true,
+    "spm_t2": true,
+    "ts_exp_write": true,
+    "settings_table": true,
+    "fram_full_read": true,
+    "quick_commands": true,
+    "fram_raw_access": true,
+    "fram_raw_write": true,
+    "jp_write": true,
+    "service_mode": true,
+    "fd_write": true,
+    "power_config_read": true,
+    "power_class_write": true,
+    "power_ac_write": true,
+    "kt_read": false,
+    "fd_read": true,
+    "kt_write": false,
+    "ek": true,
+    "eo": true
+  },
+  "serial": {
+    "baud_default": 38400,
+    "data_bits": 8,
+    "parity": "N",
+    "stop_bits": 1,
+    "evidence": "CAT RATE 默认值按文档为38400；连接前仍应与电台实际菜单设置一致。",
+    "flow_control_mode": "none"
+  },
+  "fram": {
+    "address_min": 0,
+    "address_max": 32767,
+    "config_pair_addr": 6
+  },
+  "power": {
+    "levels": {
+      "100 W": 24,
+      "50 W": 0,
+      "20 W": 8,
+      "10 W": 16
+    },
+    "ts_tables": {
+      "0": [[1.8, 2.0], [3.5, 4.0], [7.0, 7.3], [10.1, 10.15], [14.0, 14.35], [18.068, 18.168], [21.0, 21.45], [24.89, 24.99], [28.0, 29.7], [50.0, 54.0]],
+      "1": [[1.8, 2.0], [3.5, 4.0], [7.0, 7.3], [10.1, 10.15], [14.0, 14.35], [18.068, 18.168], [21.0, 21.45], [24.89, 24.99], [28.0, 29.7], [50.0, 54.0]],
+      "2": [[1.81, 2.0], [3.5, 3.8], [5.25, 5.4065], [7.0, 7.2], [10.1, 10.15], [14.0, 14.35], [18.068, 18.168], [21.0, 21.45], [24.89, 24.99], [28.0, 29.7], [50.0, 52.0], [70.0, 70.5]],
+      "3": [[1.8, 2.0], [3.5, 3.8], [5.3515, 5.3665], [7.0, 7.2], [10.1, 10.15], [14.0, 14.35], [18.068, 18.168], [21.0, 21.45], [24.89, 24.99], [28.0, 29.7], [50.0, 52.0]],
+      "4": [[1.83, 1.85], [3.5, 3.8], [7.0, 7.1], [10.1, 10.15], [14.0, 14.35], [18.068, 18.168], [21.0, 21.45], [24.89, 24.99], [28.0, 29.7], [50.0, 52.0]],
+      "5": [[1.8, 2.0], [3.5, 4.0], [7.0, 7.3], [10.1, 10.15], [14.0, 14.35], [18.068, 18.168], [21.0, 21.45], [24.89, 24.99], [28.0, 29.7], [50.0, 54.0]],
+      "6": [[1.8, 2.0], [3.5, 4.0], [7.0, 7.3], [10.1, 10.15], [14.0, 14.35], [18.068, 18.168], [21.0, 21.45], [24.89, 24.99], [28.0, 29.7], [50.0, 54.0]],
+      "7": [[1.8, 2.0], [3.5, 4.0], [5.3515, 5.3665], [7.0, 7.5], [10.0, 10.5], [14.0, 14.5], [18.0, 18.5], [21.0, 21.5], [24.5, 25.0], [28.0, 30.0], [50.0, 54.0]]
+    },
+    "exp_table": [[1.8, 30.0], [50.0, 54.0]],
+    "ts_labels": {
+      "0": "CN版本？",
+      "1": "JP版本",
+      "2": "有5mhz",
+      "3": "频段组合 4",
+      "4": "频段组合 5",
+      "5": "频段组合 6",
+      "6": "频段组合 7",
+      "7": "频段组合 8"
+    },
+    "range_note": "范围来自机型配置文件中的频段组合表；地区/固件差异请以设备手册为准。",
+    "ac_write": {
+      "items": [
+        {"label": "HF MAX POWER", "addr": "0x046A"},
+        {"label": "50M MAX POWER", "addr": "0x046B"},
+        {"label": "70M MAX POWER", "addr": "0x046C"},
+        {"label": "AM MAX POWER", "addr": "0x046D"}
+      ],
+      "targets": {
+        "100 W": [100, 100, 50, 25],
+        "50 W": [50, 50, 50, 25],
+        "20 W": [10, 20, 20, 20],
+        "10 W": [10, 10, 10, 10]
+      },
+      "evidence": "MAX POWER=AC，FRAM[0x046A–0x046D]（HF/50M/70M/AM）。按文档用 SPW 写入：写后固件 0x7D4A → 0x7E2E 重载设置块，值立即生效。同一段数据等价于菜单 MAX POWER 与标准 CAT EX（P1=03/P2=04/P3=01–04）；档位区间表 0x159F6 只用于菜单/EX 校验。",
+      "reboot_note": "功率等级需整机断电重开才生效；AC 随 SPW 写入即时生效。"
+    },
+    "exp_note": "EXP 为临时状态：设备复位或设置版本迁移时会按 JP1006/EXP 跳线状态重新覆盖。",
+    "config_pair_addr": 6,
+    "power_mask": 24,
+    "ts_mask": 7,
+    "exp_bit": 32,
+    "ts_note": "TS/频段组合有效值：0、2、3、6；1 仅在非 10 W 时有效；4、5、7 固件视为无效。写入前请确认当前功率等级。",
+    "ts_invalid": [4, 5, 7],
+    "ts_conditional": {
+      "1": "仅非 10 W"
+    }
+  },
+  "settings_table": {
+    "base_addr": 16765256,
+    "start_addr": 10,
+    "end_addr": 380,
+    "length": 371
+  },
+  "dumps": {
+    "e0_length": 229,
+    "e8_length": 10573
+  },
+  "data_files": {
+    "fram_map": "data/ftdx10/fram_map.csv",
+    "service_items": "data/ftdx10/service_items.csv"
+  },
+  "responses": {
+    "id_length": 7,
+    "ve_length": 48,
+    "jp_length": 25,
+    "fd_length": 15,
+    "kt_length": null,
+    "spm_tr_length": 14,
+    "spm_t2_length": 16,
+    "spn_length": 7,
+    "pe_length": 9,
+    "spsdr_length": 9
+  },
+  "pe_calibration": {
+    "selectors": ["0", "1", "2"],
+    "selector_positions": [[0, 2], [0, 1, 2], [0, 1, 2]],
+    "address_start": 16755665,
+    "address_end": 16755682,
+    "note": "PE 为 TX AUDIO EQ/P-EQ（18 个参数）。实机 V01-14 确认 A=0/2 有效，A=1 返回 ?;；B/C=0/1/2 分别对应 1/2/3 段和 FREQ/LEVEL/BWTH。"
+  },
+  "service_menu": {
+    "item_count": 294,
+    "index_addr": 836,
+    "subcode_addr": 838,
+    "apply_kind_labels": {
+      "item": "普通项（设置表源值）",
+      "special_11": "特殊 11 字节表头",
+      "shared_54": "共享 54 字节区块",
+      "meter_vdd": "仪表 VDD 表头",
+      "meter_alc": "仪表 ALC 表头",
+      "meter_idd": "仪表 IDD 表头"
+    }
+  },
+  "service_mode": {
+    "enter_value": 0,
+    "enter_description": "静态分析（V01-15）认为该操作进入服务模式并可能软复位； 实机未验证。",
+    "reset_warning": "其他操作值可能触发初始化/全部重置。"
+  },
+  "jp_write_status": "enabled_unverified",
+  "jp_write_note": "JP 写入语义已实机成功。",
+  "service_code": "0010"
+}
